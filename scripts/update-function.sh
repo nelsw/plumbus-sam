@@ -14,7 +14,7 @@ if [ -f test/"${DOMAIN}"/env.json ]; then ENV="$(jq '.' test/"${DOMAIN}"/env.jso
 # https://docs.aws.amazon.com/cli/latest/reference/lambda/update-function-configuration.html
 printf "\n==> updating the configuration...\n"
 aws lambda update-function-configuration \
-  --function-name "${DOMAIN}Handler" \
+  --function-name "plumbus_${DOMAIN}Handler" \
   --role "${ROLE}" \
   --description "${DESC}" \
   --timeout "${TIMEOUT}" \
@@ -25,7 +25,7 @@ printf "==> configuration updated!\n"
 # https://docs.aws.amazon.com/cli/latest/reference/lambda/update-function-code.html
 printf "\n==> updating the code...\n"
 aws lambda update-function-code \
-  --function-name "${DOMAIN}Handler" \
+  --function-name "plumbus_${DOMAIN}Handler" \
   --zip-file fileb://./main.zip
 printf "==> code updated!\n"
 

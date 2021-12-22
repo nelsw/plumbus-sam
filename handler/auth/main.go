@@ -10,12 +10,23 @@ import (
 	"os"
 )
 
-var auth0Client auth0.Auth0
+var (
+	client = auth0.NewAuth0(60, 518400)
+	jwks   = os.Getenv("JWKS_URI")
+	aud    = os.Getenv("AUTH_AUDIENCE")
+	iss    = os.Getenv("AUTH_ISSUER")
+)
 
 func init() {
-	// Instantiate an auth0 client with a Cache with the capacity for
-	// 60 tokens and a ttl of 24 hours
-	auth0Client = auth0.NewAuth0(60, 518400)
+	if len(jwks) < 1 {
+		panic("The required JWKS_URI is missing")
+	}
+	if len(aud) < 1 {
+		panic("The required AUTH_AUDIENCE is missing")
+	}
+	if len(iss) < 1 {
+		panic("The required AUTH_ISSUER is missing")
+	}
 	log.SetFormatter(&log.JSONFormatter{})
 	log.SetOutput(os.Stdout)
 }
@@ -25,37 +36,22 @@ func handle(ctx context.Context, evt events.APIGatewayCustomAuthorizerRequestTyp
 	if evt.HTTPMethod == http.MethodOptions {
 		return events.APIGatewayV2CustomAuthorizerSimpleResponse{
 			IsAuthorized: true,
-			Context: map[string]interface{}{"key":"val"},
+			Context:      map[string]interface{}{"key": "val"},
 		}, nil
 	}
 
-	if len(os.Getenv("JWKS_URI")) < 1 {
-		panic("The required JWKS_URI is missing")
-	}
-	jwkUrl := os.Getenv("JWKS_URI")
-
-	if len(os.Getenv("AUTH_AUDIENCE")) < 1 {
-		panic("The required AUTH_AUDIENCE is missing")
-	}
-	aud := os.Getenv("AUTH_AUDIENCE")
-
-	if len(os.Getenv("AUTH_ISSUER")) < 1 {
-		panic("The required AUTH_ISSUER is missing")
-	}
-	iss := os.Getenv("AUTH_ISSUER")
-
 	log.WithFields(log.Fields{
-		"event":       evt,
-		"jwkUrl":      jwkUrl,
-		"aud":         aud,
-		"iss":         iss,
-		"auth0Client": auth0Client,
-		"context":     ctx,
+		"event":   evt,
+		"jwks":    jwks,
+		"aud":     aud,
+		"iss":     iss,
+		"client":  client,
+		"context": ctx,
 	}).Info("Authorizer triggered")
 
 	jwtToken := evt.Headers["authorization"]
 
-	jwt, err := auth0Client.Validate(jwkUrl, aud, iss, jwtToken)
+	jwt, err := client.Validate(jwks, aud, iss, jwtToken)
 
 	if err != nil {
 
@@ -71,7 +67,6 @@ func handle(ctx context.Context, evt events.APIGatewayCustomAuthorizerRequestTyp
 				},
 			},
 		}
-
 
 		log.WithFields(log.Fields{
 			"jwt":      jwt,
@@ -105,11 +100,8 @@ func handle(ctx context.Context, evt events.APIGatewayCustomAuthorizerRequestTyp
 
 	return events.APIGatewayV2CustomAuthorizerSimpleResponse{
 		IsAuthorized: true,
-		Context: map[string]interface{}{"key":"val"},
+		Context:      map[string]interface{}{"key": "val"},
 	}, nil
-
-
-
 }
 
 func main() {
