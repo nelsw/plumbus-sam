@@ -11,7 +11,7 @@ if [ -f test/"${DOMAIN}"/env.json ]; then ENV="$(jq '.' test/"${DOMAIN}"/env.jso
 
 # https://docs.aws.amazon.com/cli/latest/reference/lambda/create-function.html
 aws lambda create-function \
-  --function-name "nuchal_${DOMAIN}Handler" \
+  --function-name "plumbus_${DOMAIN}Handler" \
   --runtime "go1.x" \
   --role "${ROLE}" \
   --handler "main" \
