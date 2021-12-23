@@ -2,9 +2,9 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"net/http"
+	"plumbus/pkg/util"
 	"testing"
 )
 
@@ -15,7 +15,7 @@ func TestHandleActs(t *testing.T) {
 	}
 	var data []Data
 	_ = json.Unmarshal([]byte(res.Body), &data)
-	PrettyPrint(data)
+	util.PrettyPrint(data)
 }
 
 func TestHandleCamps(t *testing.T) {
@@ -37,13 +37,4 @@ func TestHandleAds(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fail()
 	}
-}
-
-func Pretty(v interface{}) string {
-	b, _ := json.MarshalIndent(v, "", "    ")
-	return string(b)
-}
-
-func PrettyPrint(v interface{}) {
-	fmt.Println(Pretty(v))
 }

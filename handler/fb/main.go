@@ -9,7 +9,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	api "plumbus/pkg"
+	"plumbus/pkg/api"
 )
 
 const (
