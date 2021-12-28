@@ -1,8 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	log "github.com/sirupsen/logrus"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -11,16 +18,15 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 var (
+	db         *dynamodb.Client
+	tableName  = "plumbus_fb_revenue"
 	mutex      = &sync.Mutex{}
 	digitCheck = regexp.MustCompile(`^[0-9]+$`)
 )
-
-func main() {
-	getAllAdAccounts()
-}
 
 type AdAccount struct {
 	ID          string  `json:"id"`
@@ -46,13 +52,135 @@ type AdSet struct {
 	Spend        string `json:"spend"`
 }
 
+type GuardOrder int
+
+const (
+	WinningOrder GuardOrder = iota
+	LosingOrder
+	ExitingOrder
+	MissingOrder
+)
+
+type GuardStatus string
+
+const (
+	WinningStatus = "🟢 - Winning"
+	LosingStatus  = "🟡 - Losing"
+	ExitingStatus = "🔴 - Exiting"
+	MissingStatus = "⁉️ - Missing"
+)
+
 type CampaignGuard struct {
-	FacebookCampaignID string  `json:"facebook_campaign_id"`
-	SovrnCampaignID    string  `json:"sovrn_campaign_id"`
-	Spend              float64 `json:"spend"`
+	FacebookCampaignID string      `json:"facebook_campaign_id"`
+	SovrnCampaignID    string      `json:"sovrn_campaign_id"`
+	Spend              float64     `json:"spend"`
+	Revenue            float64     `json:"revenue"`
+	Profit             float64     `json:"profit"`
+	Status             GuardStatus `json:"status"`
+	order              GuardOrder
 }
 
-func getAllAdAccounts() {
+func init() {
+	log.SetOutput(os.Stdout)
+	log.SetFormatter(&log.TextFormatter{
+		DisableColors: false,
+		FullTimestamp: true,
+		ForceColors:   true,
+	})
+	if cfg, err := config.LoadDefaultConfig(context.TODO()); err != nil {
+		log.WithFields(log.Fields{"err": err}).Error()
+		panic(err)
+	} else {
+		db = dynamodb.NewFromConfig(cfg)
+	}
+}
+
+func handle() {
+
+	var rev float64
+	var err error
+
+	var results []CampaignGuard
+
+	for _, guard := range getAllAdAccounts() {
+
+		if rev, err = getRevenue(guard.SovrnCampaignID); err != nil || rev < 0 {
+			if err != nil {
+				fmt.Println(guard, err)
+			}
+			if rev, err = getRevenue(guard.FacebookCampaignID); err != nil || rev < 0 {
+				if err != nil {
+					fmt.Println(guard, err)
+				}
+				guard.Status = MissingStatus
+				guard.order = MissingOrder
+				results = append(results, guard)
+				continue
+			}
+		}
+
+		guard.Revenue = rev
+		guard.Profit = guard.Revenue - guard.Spend
+
+		if guard.Profit > 0 {
+			guard.Status = WinningStatus
+			guard.order = WinningOrder
+		} else if guard.Profit < -100 {
+			guard.Status = ExitingStatus
+			guard.order = ExitingOrder
+			pauseCampaign(guard.FacebookCampaignID, 0)
+		} else {
+			guard.Status = LosingStatus
+			guard.order = LosingOrder
+		}
+
+		results = append(results, guard)
+	}
+
+	sort.SliceStable(results, func(i, j int) bool {
+		ri := results[i]
+		rj := results[j]
+		a := int(ri.order)
+		z := int(rj.order)
+		if a == z {
+			return ri.Profit > rj.Profit
+		}
+		return a < z
+	})
+
+	PrettyPrint(results)
+}
+
+func getRevenue(id string) (float64, error) {
+
+	out, err := db.GetItem(context.TODO(), &dynamodb.GetItemInput{
+		Key:       map[string]types.AttributeValue{"campaign": &types.AttributeValueMemberS{Value: id}},
+		TableName: &tableName,
+	})
+
+	if err != nil {
+		log.WithFields(log.Fields{"err": err}).Error()
+		return -1, err
+	}
+
+	var r struct {
+		Campaign string  `json:"campaign"`
+		Revenue  float64 `json:"revenue"`
+	}
+
+	if err = attributevalue.UnmarshalMap(out.Item, &r); err != nil {
+		log.WithFields(log.Fields{"err": err}).Error()
+		return -1, err
+	}
+
+	if r.Campaign == "" {
+		return -1, nil
+	}
+
+	return r.Revenue, nil
+}
+
+func getAllAdAccounts() []CampaignGuard {
 
 	base := "https://graph.facebook.com/v12.0/10158615602243295/adaccounts"
 	token := "?access_token=" + os.Getenv("tkn")
@@ -77,15 +205,13 @@ func getAllAdAccounts() {
 
 	var f float64
 	var guards []CampaignGuard
-	for accountID, _ := range actives {
+	for accountID := range actives {
 
 		for _, adSet := range getAllAdSetInsights(accountID) {
 
-			if f, err = strconv.ParseFloat(adSet.Spend, 64); err != nil || f < 100 {
-				if err != nil {
-					PrettyPrint(adSet)
-					fmt.Println(err)
-				}
+			if f, err = strconv.ParseFloat(adSet.Spend, 64); err != nil {
+				PrettyPrint(adSet)
+				fmt.Println(err)
 				continue
 			}
 
@@ -96,7 +222,11 @@ func getAllAdAccounts() {
 				sovrnCampaignID = scored[0]
 			}
 
-			guards = append(guards, CampaignGuard{adSet.CampaignID, sovrnCampaignID, f})
+			guards = append(guards, CampaignGuard{
+				FacebookCampaignID: adSet.CampaignID,
+				SovrnCampaignID:    sovrnCampaignID,
+				Spend:              f,
+			})
 		}
 	}
 
@@ -104,8 +234,7 @@ func getAllAdAccounts() {
 		return guards[i].Spend > guards[j].Spend
 	})
 
-	PrettyPrint(guards)
-	PrettyPrint(len(guards))
+	return guards
 }
 
 func getActiveCampaigns(activeAdAccounts []AdAccount) map[string][]Campaign {
@@ -280,6 +409,39 @@ func getAdSetInsights(url string) (data []AdSet, err error) {
 	return data, nil
 }
 
+func pauseCampaign(id string, attempt int) {
+
+	if attempt > 3 {
+		fmt.Println("max attempts reached for pausing campaign ... check your code and manual pause", id)
+		return
+	}
+
+	var req *http.Request
+	var err error
+
+	if req, err = http.NewRequest(http.MethodPost, "https://graph.facebook.com/v12.0/"+id, nil); err != nil {
+		fmt.Println(err)
+		pauseCampaign(id, attempt+1)
+		return
+	}
+
+	q := req.URL.Query()
+	q.Add("access_token", os.Getenv("tkn"))
+	q.Add("status", "PAUSED")
+	req.URL.RawQuery = q.Encode()
+
+	client := &http.Client{Timeout: 25 * time.Second}
+	_, err = client.Do(req)
+
+	if err != nil {
+		fmt.Println(err)
+		pauseCampaign(id, attempt+1)
+		return
+	}
+
+	return
+}
+
 func Pretty(v interface{}) string {
 	b, _ := json.MarshalIndent(v, "", "    ")
 	return string(b)
@@ -287,4 +449,8 @@ func Pretty(v interface{}) string {
 
 func PrettyPrint(v interface{}) {
 	fmt.Println(Pretty(v))
+}
+
+func main() {
+	lambda.Start(handle)
 }
