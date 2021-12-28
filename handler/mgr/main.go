@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -13,6 +15,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"plumbus/pkg/api"
+	"plumbus/pkg/util"
 	"regexp"
 	"sort"
 	"strconv"
@@ -71,13 +75,29 @@ const (
 )
 
 type CampaignGuard struct {
-	FacebookCampaignID string      `json:"facebook_campaign_id"`
-	SovrnCampaignID    string      `json:"sovrn_campaign_id"`
-	Spend              float64     `json:"spend"`
-	Revenue            float64     `json:"revenue"`
-	Profit             float64     `json:"profit"`
-	Status             GuardStatus `json:"status"`
-	order              GuardOrder
+	Account  string      `json:"account"`
+	Facebook string      `json:"facebook"`
+	Sovrn    string      `json:"sovrn"`
+	Spend    float64     `json:"spend"`
+	Revenue  float64     `json:"revenue"`
+	Profit   float64     `json:"profit"`
+	Status   GuardStatus `json:"status"`
+	order    GuardOrder
+}
+
+func (i CampaignGuard) toPutItemInput() *dynamodb.PutItemInput {
+	return &dynamodb.PutItemInput{
+		TableName: aws.String("plumbus_mgr"),
+		Item: map[string]types.AttributeValue{
+			"account":  &types.AttributeValueMemberS{Value: i.Account},
+			"facebook": &types.AttributeValueMemberS{Value: i.Facebook},
+			"sovrn":    &types.AttributeValueMemberS{Value: i.Sovrn},
+			"spend":    &types.AttributeValueMemberN{Value: util.FloatToDecimal(i.Spend)},
+			"revenue":  &types.AttributeValueMemberN{Value: util.FloatToDecimal(i.Revenue)},
+			"profit":   &types.AttributeValueMemberN{Value: util.FloatToDecimal(i.Profit)},
+			"status":   &types.AttributeValueMemberS{Value: string(i.Status)},
+		},
+	}
 }
 
 func init() {
@@ -95,7 +115,36 @@ func init() {
 	}
 }
 
-func handle() {
+func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+
+	log.WithFields(log.Fields{"req": request}).Info()
+
+	if request.RequestContext.HTTP.Method == http.MethodGet {
+		out, err := db.Scan(context.TODO(), &dynamodb.ScanInput{
+			TableName: aws.String("plumbus_mgr"),
+		})
+
+		//PrettyPrint(out)
+
+		if err != nil {
+			return api.Err(err)
+		}
+
+		var pays []CampaignGuard
+
+		err = attributevalue.UnmarshalListOfMaps(out.Items, &pays)
+		if err != nil {
+			return api.Err(err)
+		}
+
+		var body []byte
+		body, err = json.Marshal(&pays)
+		if err != nil {
+			return api.Err(err)
+		}
+
+		return api.OK(string(body))
+	}
 
 	var rev float64
 	var err error
@@ -104,11 +153,11 @@ func handle() {
 
 	for _, guard := range getAllAdAccounts() {
 
-		if rev, err = getRevenue(guard.SovrnCampaignID); err != nil || rev < 0 {
+		if rev, err = getRevenue(guard.Sovrn); err != nil || rev < 0 {
 			if err != nil {
 				fmt.Println(guard, err)
 			}
-			if rev, err = getRevenue(guard.FacebookCampaignID); err != nil || rev < 0 {
+			if rev, err = getRevenue(guard.Facebook); err != nil || rev < 0 {
 				if err != nil {
 					fmt.Println(guard, err)
 				}
@@ -128,7 +177,7 @@ func handle() {
 		} else if guard.Profit < -100 {
 			guard.Status = ExitingStatus
 			guard.order = ExitingOrder
-			pauseCampaign(guard.FacebookCampaignID, 0)
+			pauseCampaign(guard.Facebook, 0)
 		} else {
 			guard.Status = LosingStatus
 			guard.order = LosingOrder
@@ -148,7 +197,39 @@ func handle() {
 		return a < z
 	})
 
-	PrettyPrint(results)
+	var out *dynamodb.ScanOutput
+	if out, err = db.Scan(context.TODO(), &dynamodb.ScanInput{TableName: &tableName}); err != nil {
+		return api.Err(err)
+	}
+
+	type old struct {
+		Facebook string `json:"facebook"`
+	}
+
+	var olds []old
+
+	if err = attributevalue.UnmarshalListOfMaps(out.Items, &olds); err != nil {
+		return api.Err(err)
+	}
+
+	for _, o := range olds {
+		dii := &dynamodb.DeleteItemInput{
+			TableName: aws.String("plumbus_mgr"),
+			Key:       map[string]types.AttributeValue{"facebook": &types.AttributeValueMemberS{Value: o.Facebook}},
+		}
+		if _, err = db.DeleteItem(context.TODO(), dii); err != nil {
+			fmt.Println(err)
+		}
+	}
+
+	for _, r := range results {
+		if _, err = db.PutItem(context.TODO(), r.toPutItemInput()); err != nil {
+			fmt.Println(r)
+			fmt.Println(err)
+		}
+	}
+
+	return api.OK("")
 }
 
 func getRevenue(id string) (float64, error) {
@@ -191,12 +272,13 @@ func getAllAdAccounts() []CampaignGuard {
 	var data []AdAccount
 
 	if data, err = getAdAccounts(url); err != nil {
+		fmt.Println(err)
 		panic(err)
 	}
 
 	var activeAdAccounts []AdAccount
 	for _, adAccount := range data {
-		if (adAccount.Status == 1 || adAccount.Status == 201) && adAccount.AmountSpent != "0" {
+		if adAccount.Status == 1 || adAccount.Status == 201 {
 			activeAdAccounts = append(activeAdAccounts, adAccount)
 		}
 	}
@@ -223,9 +305,10 @@ func getAllAdAccounts() []CampaignGuard {
 			}
 
 			guards = append(guards, CampaignGuard{
-				FacebookCampaignID: adSet.CampaignID,
-				SovrnCampaignID:    sovrnCampaignID,
-				Spend:              f,
+				Account:  accountID,
+				Facebook: adSet.CampaignID,
+				Sovrn:    sovrnCampaignID,
+				Spend:    f,
 			})
 		}
 	}
