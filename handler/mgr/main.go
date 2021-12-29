@@ -197,7 +197,7 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 		} else if guard.Profit < -100 {
 			guard.Status = ExitingStatus
 			guard.order = ExitingOrder
-			pauseCampaign(guard.Facebook, 0)
+			//pauseCampaign(guard.Facebook, 0)
 		} else {
 			guard.Status = LosingStatus
 			guard.order = LosingOrder
