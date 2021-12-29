@@ -1,21 +1,17 @@
 package main
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
-	b64 "encoding/base64"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	log "github.com/sirupsen/logrus"
-	"io"
 	"net/http"
 	"os"
 )
@@ -44,47 +40,104 @@ func init() {
 
 func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 
-	log.WithFields(log.Fields{"request": request}).Info()
-
-	fmt.Println(request.Body)
-
-	var p Payload
-
-	var err error
-
-	err = json.Unmarshal([]byte(request.Body), &p)
-
-	log.WithFields(log.Fields{"payload": p}).Info()
-
-	sDec, _ := b64.StdEncoding.DecodeString(p.Attachment.Data)
-	fmt.Println(string(sDec))
-	fmt.Println()
-
-	var reader *zip.Reader
-	if reader, err = zip.NewReader(bytes.NewReader(sDec), int64(len(sDec))); err != nil {
-		fmt.Println("unable to read")
-		fmt.Println(err)
-		return response(http.StatusBadRequest)
+	accountsToSkip := map[string]interface{}{
+		"413679809716807":   nil,
+		"750877365817118":   nil,
+		"192357189581498":   nil,
+		"612031486585483":   nil,
+		"3575472439245925":  nil,
+		"619944848765264":   nil,
+		"218941270288997":   nil,
+		"245495866953965":   nil,
+		"5688782297830054":  nil,
+		"491184258440143":   nil,
+		"2403739559944547":  nil,
+		"12817637":          nil,
+		"3671868129555357":  nil,
+		"333485221856766":   nil,
+		"155263960129351":   nil,
+		"2177908659168303":  nil,
+		"625915844866526":   nil,
+		"2180764178898025":  nil,
+		"246088729880368":   nil,
+		"1097225754361421":  nil,
+		"1243882536086716":  nil,
+		"254126193351151":   nil,
+		"931887524201557":   nil,
+		"428801301949781":   nil,
+		"913678565938954":   nil,
+		"1515798122112809":  nil,
+		"546285956018323":   nil,
+		"259223871759580":   nil,
+		"547586279498916":   nil,
+		"209494886979585":   nil,
+		"1450566098533975":  nil,
+		"426011485278946":   nil,
+		"1171166016595742":  nil,
+		"830846364118052":   nil,
+		"788842328547187":   nil,
+		"222205359142916":   nil,
+		"1408104866244851":  nil,
+		"338022787312593":   nil,
+		"665195921058997":   nil,
+		"2326888560975233":  nil,
+		"10150903730580756": nil,
+		"302191798223982":   nil,
+		"248532193069417":   nil,
+		"279967990799943":   nil,
 	}
 
-	for _, file := range reader.File {
-
-		if file.Name != "dashboard-acquisition/performance.csv" {
-			continue
+	for key := range accountsToSkip {
+		_, err := db.PutItem(context.TODO(), &dynamodb.PutItemInput{
+			Item:      map[string]types.AttributeValue{"account_id": &types.AttributeValueMemberS{Value: key}},
+			TableName: aws.String("plumbus_ignored_ad_accounts"),
+		})
+		if err != nil {
+			fmt.Println(key, err)
 		}
-
-		var closer io.ReadCloser
-		if closer, err = file.Open(); err != nil {
-			return response(http.StatusBadRequest)
-		}
-
-		var data [][]string
-		if data, err = csv.NewReader(closer).ReadAll(); err != nil {
-			return response(http.StatusBadRequest)
-		}
-
-		fmt.Println(data)
 	}
+
+	//log.WithFields(log.Fields{"request": request}).Info()
+	//
+	//fmt.Println(request.Body)
+	//
+	//var p Payload
+	//
+	//var err error
+	//
+	//err = json.Unmarshal([]byte(request.Body), &p)
+	//
+	//log.WithFields(log.Fields{"payload": p}).Info()
+	//
+	//sDec, _ := b64.StdEncoding.DecodeString(p.Attachment.Data)
+	//fmt.Println(string(sDec))
+	//fmt.Println()
+	//
+	//var reader *zip.Reader
+	//if reader, err = zip.NewReader(bytes.NewReader(sDec), int64(len(sDec))); err != nil {
+	//	fmt.Println("unable to read")
+	//	fmt.Println(err)
+	//	return response(http.StatusBadRequest)
+	//}
+	//
+	//for _, file := range reader.File {
+	//
+	//	if file.Name != "dashboard-acquisition/performance.csv" {
+	//		continue
+	//	}
+	//
+	//	var closer io.ReadCloser
+	//	if closer, err = file.Open(); err != nil {
+	//		return response(http.StatusBadRequest)
+	//	}
+	//
+	//	var data [][]string
+	//	if data, err = csv.NewReader(closer).ReadAll(); err != nil {
+	//		return response(http.StatusBadRequest)
+	//	}
+	//
+	//	fmt.Println(data)
+	//}
 
 	return response(http.StatusOK)
 }

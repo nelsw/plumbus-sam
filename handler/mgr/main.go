@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"plumbus/pkg/api"
+	"plumbus/pkg/svc"
 	"plumbus/pkg/util"
 	"regexp"
 	"sort"
@@ -30,6 +31,7 @@ var (
 	tableName  = "plumbus_fb_revenue"
 	mutex      = &sync.Mutex{}
 	digitCheck = regexp.MustCompile(`^[0-9]+$`)
+	ctx        = context.TODO()
 )
 
 type AdAccount struct {
@@ -70,7 +72,7 @@ type GuardStatus string
 const (
 	WinningStatus = "🟢 - Winning"
 	LosingStatus  = "🟡 - Losing"
-	ExitingStatus = "🔴 - Exiting"
+	ExitingStatus = "🔴 - Pausing"
 	MissingStatus = "⁉️ - Missing"
 )
 
@@ -101,15 +103,16 @@ func (i CampaignGuard) toPutItemInput() *dynamodb.PutItemInput {
 }
 
 func init() {
+
 	log.SetOutput(os.Stdout)
 	log.SetFormatter(&log.TextFormatter{
 		DisableColors: false,
 		FullTimestamp: true,
 		ForceColors:   true,
 	})
-	if cfg, err := config.LoadDefaultConfig(context.TODO()); err != nil {
-		log.WithFields(log.Fields{"err": err}).Error()
-		panic(err)
+
+	if cfg, err := config.LoadDefaultConfig(ctx); err != nil {
+		log.WithError(err).Fatal()
 	} else {
 		db = dynamodb.NewFromConfig(cfg)
 	}
@@ -119,27 +122,45 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 
 	log.WithFields(log.Fields{"req": request}).Info()
 
+	var err error
+
+	var accountsToIgnoreSlice []string
+	if accountsToIgnoreSlice, err = svc.AdAccountsToIgnoreSlice(); err != nil {
+		log.WithError(err).Error()
+		return api.Err(err)
+	}
+
+	accountsToIgnoreMap := map[string]interface{}{}
+	if accountsToIgnoreMap, err = svc.AdAccountsToIgnoreMap(); err != nil {
+		log.WithError(err).Error()
+		return api.Err(err)
+	}
+
 	if request.RequestContext.HTTP.Method == http.MethodGet {
-		out, err := db.Scan(context.TODO(), &dynamodb.ScanInput{
-			TableName: aws.String("plumbus_mgr"),
-		})
 
-		//PrettyPrint(out)
-
-		if err != nil {
+		var scanOutput *dynamodb.ScanOutput
+		if scanOutput, err = db.Scan(ctx, &dynamodb.ScanInput{
+			TableName:        aws.String("plumbus_mgr"),
+			FilterExpression: aws.String("not contains(:accounts, account)"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":accounts": &types.AttributeValueMemberSS{
+					Value: accountsToIgnoreSlice,
+				},
+			},
+		}); err != nil {
+			log.WithError(err).Error()
 			return api.Err(err)
 		}
 
-		var pays []CampaignGuard
-
-		err = attributevalue.UnmarshalListOfMaps(out.Items, &pays)
-		if err != nil {
+		var campaignGuards []CampaignGuard
+		if err = attributevalue.UnmarshalListOfMaps(scanOutput.Items, &campaignGuards); err != nil {
+			log.WithError(err).Error()
 			return api.Err(err)
 		}
 
 		var body []byte
-		body, err = json.Marshal(&pays)
-		if err != nil {
+		if body, err = json.Marshal(&campaignGuards); err != nil {
+			log.WithError(err).Error()
 			return api.Err(err)
 		}
 
@@ -147,11 +168,10 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 	}
 
 	var rev float64
-	var err error
 
 	var results []CampaignGuard
 
-	for _, guard := range getAllAdAccounts() {
+	for _, guard := range getAllAdAccounts(accountsToIgnoreMap) {
 
 		if rev, err = getRevenue(guard.Sovrn); err != nil || rev < 0 {
 			if err != nil {
@@ -261,7 +281,7 @@ func getRevenue(id string) (float64, error) {
 	return r.Revenue, nil
 }
 
-func getAllAdAccounts() []CampaignGuard {
+func getAllAdAccounts(accountsToIgnoreMap map[string]interface{}) []CampaignGuard {
 
 	base := "https://graph.facebook.com/v12.0/10158615602243295/adaccounts"
 	token := "?access_token=" + os.Getenv("tkn")
@@ -278,6 +298,9 @@ func getAllAdAccounts() []CampaignGuard {
 
 	var activeAdAccounts []AdAccount
 	for _, adAccount := range data {
+		if _, ok := accountsToIgnoreMap[adAccount.ID]; ok {
+			continue
+		}
 		if adAccount.Status == 1 || adAccount.Status == 201 {
 			activeAdAccounts = append(activeAdAccounts, adAccount)
 		}
@@ -514,13 +537,14 @@ func pauseCampaign(id string, attempt int) {
 	req.URL.RawQuery = q.Encode()
 
 	client := &http.Client{Timeout: 25 * time.Second}
-	_, err = client.Do(req)
 
-	if err != nil {
+	if _, err = client.Do(req); err != nil {
 		fmt.Println(err)
 		pauseCampaign(id, attempt+1)
 		return
 	}
+
+	fmt.Println("paused", id)
 
 	return
 }

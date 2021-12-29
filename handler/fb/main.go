@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	faas "github.com/aws/aws-sdk-go-v2/service/lambda"
 	log "github.com/sirupsen/logrus"
 	"io/ioutil"
 	"net/http"
@@ -26,9 +28,15 @@ const (
 )
 
 var (
-	db         *dynamodb.Client
-	tableName  = "plumbus_fb_revenue"
-	digitCheck = regexp.MustCompile(`^[0-9]+$`)
+	db          *dynamodb.Client
+	tableName   = "plumbus_fb_revenue"
+	digitCheck  = regexp.MustCompile(`^[0-9]+$`)
+	sam         *faas.Client
+	ctx         = context.TODO()
+	invokeInput = faas.InvokeInput{
+		FunctionName: aws.String("plumbus_accountHandler"),
+		LogType:      "Tail",
+	}
 )
 
 type Data struct {
@@ -84,17 +92,19 @@ type Campaign struct {
 }
 
 func init() {
+
 	log.SetOutput(os.Stdout)
 	log.SetFormatter(&log.TextFormatter{
 		DisableColors: false,
 		FullTimestamp: true,
 		ForceColors:   true,
 	})
+
 	if cfg, err := config.LoadDefaultConfig(context.TODO()); err != nil {
-		log.WithFields(log.Fields{"err": err}).Error()
-		panic(err)
+		log.WithError(err).Fatal()
 	} else {
 		db = dynamodb.NewFromConfig(cfg)
+		sam = faas.NewFromConfig(cfg)
 	}
 }
 
@@ -131,6 +141,7 @@ type AdAccount struct {
 }
 
 func getAllAdAccounts() (events.APIGatewayV2HTTPResponse, error) {
+
 	base := "https://graph.facebook.com/v12.0/10158615602243295/adaccounts"
 	token := "?access_token=" + os.Getenv("tkn")
 	fields := "&fields=account_id,name,age,amount_spent,account_status"
@@ -140,14 +151,35 @@ func getAllAdAccounts() (events.APIGatewayV2HTTPResponse, error) {
 	var data []AdAccount
 
 	if data, err = getAdAccounts(url); err != nil {
+		log.WithError(err).Error()
 		return api.Err(err)
+	}
+
+	var invokeOutput *faas.InvokeOutput
+	if invokeOutput, err = sam.Invoke(ctx, &invokeInput); err != nil {
+		log.WithError(err).Error()
+		return api.Err(err)
+	}
+
+	var adAccountsToIgnore []map[string]string
+	if err = json.Unmarshal(invokeOutput.Payload, &adAccountsToIgnore); err != nil {
+		log.WithError(err).Error()
+		return api.Err(err)
+	}
+
+	accountsToIgnoreMap := map[string]interface{}{}
+	for _, accountToIgnore := range adAccountsToIgnore {
+		accountsToIgnoreMap[accountToIgnore["account_id"]] = nil
 	}
 
 	var wg sync.WaitGroup
 	for i, adAccount := range data {
+		key, val := accountsToIgnoreMap[adAccount.AccountID]
+		fmt.Println("key", key, "val", val)
 		wg.Add(1)
 		go func(i int, adAccount AdAccount) {
 			data[i].Campaigns = getAllCampaigns(adAccount.AccountID)
+			fmt.Println("data[i].Campaigns", data[i].Campaigns)
 			wg.Done()
 		}(i, adAccount)
 	}
@@ -165,13 +197,17 @@ func getAdAccounts(url string) (data []AdAccount, err error) {
 
 	var res *http.Response
 	if res, err = http.Get(url); err != nil {
+		log.WithError(err).Error()
 		return
 	}
 
 	var body []byte
 	if body, err = ioutil.ReadAll(res.Body); err != nil {
+		log.WithError(err).Error()
 		return
 	}
+
+	fmt.Println(string(body))
 
 	var payload struct {
 		Data []AdAccount `json:"data"`
@@ -181,6 +217,7 @@ func getAdAccounts(url string) (data []AdAccount, err error) {
 	}
 
 	if err = json.Unmarshal(body, &payload); err != nil {
+		log.WithError(err).Error()
 		return
 	}
 
@@ -190,6 +227,7 @@ func getAdAccounts(url string) (data []AdAccount, err error) {
 
 	var next []AdAccount
 	if next, err = getAdAccounts(payload.Page.Next); err != nil {
+		log.WithError(err).Error()
 		return
 	}
 
