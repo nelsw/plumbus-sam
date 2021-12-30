@@ -1,129 +1,85 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/smithy-go/ptr"
 	log "github.com/sirupsen/logrus"
 	"plumbus/pkg/fb"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/util/logs"
 )
 
-var (
-	key   = "account_id"
-	table = "plumbus_ignored_ad_accounts"
-	input = &dynamodb.ScanInput{TableName: &table}
-)
-
 func init() {
 	logs.Init()
 }
 
-func handle(ctx context.Context) (out map[string]interface{}, err error) {
+func handle(in map[string]interface{}) (map[string]interface{}, error) {
 
-	var arr interface{}
-	if arr, err = getAccountsToIgnore(); err != nil {
+	ignore, err := accountsToIgnore()
+
+	if err != nil {
 		log.WithError(err).Error()
-		return
+		return nil, err
 	}
 
-	var bytes []byte
-	if bytes, err = json.Marshal(&arr); err != nil {
+	if _, ok := in["ignore"]; ok {
+		return ignore, nil
+	}
+
+	if _, ok := in["accounts"]; ok {
+		return accounts(ignore)
+	}
+
+	if id, ok := in["account"]; ok {
+		return account(fmt.Sprintf("%v", id), ignore)
+	}
+
+	return nil, errors.New("key not found")
+}
+
+func accounts(ignore map[string]interface{}) (map[string]interface{}, error) {
+	if out, err := fb.Accounts().Marketing().GET(); err != nil {
 		log.WithError(err).Error()
-		return
-	}
-
-	var bads []struct {
-		AccountID string `json:"account_id"`
-	}
-	if err = json.Unmarshal(bytes, &bads); err != nil {
-		log.WithError(err).Error()
-		return
-	}
-
-	var value interface{}
-
-	/*
-		return info for all valid accounts
-	*/
-	if value = ctx.Value("accounts"); value != nil {
-
-		if out, err = fb.Accounts().Marketing().GET(); err != nil {
-			log.WithError(err).Error()
-			return
-		}
-
-		bad := map[string]interface{}{}
-		for _, b := range bads {
-			bad[b.AccountID] = b.AccountID
-		}
-
-		for k := range out {
-			if _, ok := bad[k]; ok {
-				delete(out, k)
-			} else {
-				var tmp map[string]interface{}
-				if tmp, err = getAccountById(k); err != nil {
-					log.WithError(err).Error()
-				} else {
-					out[k] = tmp
-				}
+		return nil, err
+	} else {
+		res := map[string]interface{}{}
+		for k, v := range out {
+			if _, ok := ignore[k]; !ok {
+				res[k] = v
 			}
 		}
-
-		return
+		return res, nil
 	}
-
-	/*
-		return info for a single account_id
-	*/
-	if value = ctx.Value(key); value != nil {
-		if out, err = getAccountById(value); err != nil {
-			log.WithError(err).Error()
-		}
-		return
-	}
-
-	/*
-		return info regarding accounts to ignore
-	*/
-	out = map[string]interface{}{}
-	for _, b := range bads {
-		out[b.AccountID] = true
-	}
-
-	return
 }
 
-func getAccountById(value interface{}) (out map[string]interface{}, err error) {
-
-	var accountID = fmt.Sprintf("%v", value)
-
-	var exists bool
-	if exists, err = repo.Exists(table, key, accountID); err != nil {
+func account(accountID string, ignore map[string]interface{}) (map[string]interface{}, error) {
+	if _, found := ignore[accountID]; found {
+		return nil, errors.New("requested account is ignored")
+	}
+	if out, err := fb.Account(accountID).Marketing().GET(); err != nil {
 		log.WithError(err).Error()
-		return
+		return nil, err
+	} else {
+		return out, nil
 	}
-
-	if exists {
-		return
-	}
-
-	if out, err = fb.Account(accountID).Marketing().GET(); err != nil {
-		log.WithError(err).Error()
-	}
-
-	return
 }
 
-func getAccountsToIgnore() (arr interface{}, err error) {
-	if err = repo.ScanInputAndUnmarshal(input, &arr); err != nil {
+func accountsToIgnore() (map[string]interface{}, error) {
+	in := &dynamodb.ScanInput{TableName: ptr.String("plumbus_ignored_ad_accounts")}
+	var out interface{}
+	if err := repo.ScanInputAndUnmarshal(in, &out); err != nil {
 		log.WithError(err).Error()
+		return nil, err
 	}
-	return
+	res := map[string]interface{}{}
+	for _, w := range out.([]interface{}) {
+		z := w.(map[string]interface{})
+		res[fmt.Sprintf("%v", z["account_id"])] = true
+	}
+	return res, nil
 }
 
 func main() {

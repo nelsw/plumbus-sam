@@ -19,6 +19,7 @@ import (
 	"plumbus/pkg/repo"
 	"plumbus/pkg/svc"
 	"plumbus/pkg/util"
+	"plumbus/pkg/util/logs"
 	"regexp"
 	"sort"
 	"strconv"
@@ -78,39 +79,36 @@ const (
 )
 
 type CampaignGuard struct {
-	Account  string      `json:"account"`
-	Facebook string      `json:"facebook"`
-	Sovrn    string      `json:"sovrn"`
-	Spend    float64     `json:"spend"`
-	Revenue  float64     `json:"revenue"`
-	Profit   float64     `json:"profit"`
-	Status   GuardStatus `json:"status"`
-	order    GuardOrder
+	Account     string      `json:"account"`
+	Facebook    string      `json:"facebook"`
+	Sovrn       string      `json:"sovrn"`
+	Spend       float64     `json:"spend"`
+	Revenue     float64     `json:"revenue"`
+	Profit      float64     `json:"profit"`
+	Status      GuardStatus `json:"status"`
+	order       GuardOrder
+	Delineation string `json:"sovrn_account"`
 }
 
 func (i CampaignGuard) toPutItemInput() *dynamodb.PutItemInput {
 	return &dynamodb.PutItemInput{
 		TableName: aws.String("plumbus_mgr"),
 		Item: map[string]types.AttributeValue{
-			"account":  &types.AttributeValueMemberS{Value: i.Account},
-			"facebook": &types.AttributeValueMemberS{Value: i.Facebook},
-			"sovrn":    &types.AttributeValueMemberS{Value: i.Sovrn},
-			"spend":    &types.AttributeValueMemberN{Value: util.FloatToDecimal(i.Spend)},
-			"revenue":  &types.AttributeValueMemberN{Value: util.FloatToDecimal(i.Revenue)},
-			"profit":   &types.AttributeValueMemberN{Value: util.FloatToDecimal(i.Profit)},
-			"status":   &types.AttributeValueMemberS{Value: string(i.Status)},
+			"account":     &types.AttributeValueMemberS{Value: i.Account},
+			"facebook":    &types.AttributeValueMemberS{Value: i.Facebook},
+			"sovrn":       &types.AttributeValueMemberS{Value: i.Sovrn},
+			"spend":       &types.AttributeValueMemberN{Value: util.FloatToDecimal(i.Spend)},
+			"revenue":     &types.AttributeValueMemberN{Value: util.FloatToDecimal(i.Revenue)},
+			"profit":      &types.AttributeValueMemberN{Value: util.FloatToDecimal(i.Profit)},
+			"status":      &types.AttributeValueMemberS{Value: string(i.Status)},
+			"deliniation": &types.AttributeValueMemberS{Value: i.Delineation},
 		},
 	}
 }
 
 func init() {
 
-	log.SetOutput(os.Stdout)
-	log.SetFormatter(&log.TextFormatter{
-		DisableColors: false,
-		FullTimestamp: true,
-		ForceColors:   true,
-	})
+	logs.Init()
 
 	if cfg, err := config.LoadDefaultConfig(ctx); err != nil {
 		log.WithError(err).Fatal()
@@ -127,12 +125,6 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 
 	var accountsToIgnoreSlice []string
 	if accountsToIgnoreSlice, err = svc.AdAccountsToIgnoreSlice(); err != nil {
-		log.WithError(err).Error()
-		return api.Err(err)
-	}
-
-	accountsToIgnoreMap := map[string]interface{}{}
-	if accountsToIgnoreMap, err = svc.AdAccountsToIgnoreMap(); err != nil {
 		log.WithError(err).Error()
 		return api.Err(err)
 	}
@@ -171,6 +163,12 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 	var rev float64
 
 	var results []CampaignGuard
+
+	accountsToIgnoreMap := map[string]interface{}{}
+	if accountsToIgnoreMap, err = svc.AdAccountsToIgnoreMap(); err != nil {
+		log.WithError(err).Error()
+		return api.Err(err)
+	}
 
 	for _, guard := range getAllAdAccounts(accountsToIgnoreMap) {
 
@@ -280,11 +278,6 @@ func getRevenue(id string) (float64, error) {
 	}
 
 	return r.Revenue, nil
-}
-
-func remove(slice []AdAccount, i int) []AdAccount {
-	copy(slice[i:], slice[i+1:])
-	return slice[:len(slice)-1]
 }
 
 func getAllAdAccounts(accountsToIgnoreMap map[string]interface{}) []CampaignGuard {
@@ -420,7 +413,7 @@ func getAdAccounts(url string) (data []AdAccount, err error) {
 		return
 	}
 
-	if data = append(payload.Data); payload.Page.Next == "" {
+	if data = append(data, payload.Data...); payload.Page.Next == "" {
 		return
 	}
 

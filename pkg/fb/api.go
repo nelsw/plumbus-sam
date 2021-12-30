@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"plumbus/pkg/repo"
 	"plumbus/pkg/util"
 	"plumbus/pkg/util/logs"
 	"strconv"
@@ -35,6 +36,7 @@ var (
 	}
 	campaignMarketingFields = []string{
 		"id",
+		"account_id",
 		"budget_remaining",
 		"created_time",
 		"name",
@@ -168,35 +170,63 @@ func (a *API) GET() (map[string]interface{}, error) {
 
 			var got = map[string]interface{}{}
 			for _, o := range out {
-				got[objx.New(o).Get("id").String()] = o
+
+				id := objx.New(o).Get("id").String()
+				m := objx.New(o).Value().ObjxMap()
+				name := fmt.Sprintf("%v", m["name"])
+				remainingBudget := fmt.Sprintf("%v", m["budget_remaining"])
+
+				if len(remainingBudget) > 3 {
+					m["budget_remaining_f"] = usd(remainingBudget)
+				} else {
+					m["budget_remaining_f"] = "$" + remainingBudget + ".00"
+				}
+
+				var campaignUTM string
+				if subbed := getParenWrappedCampaignUTM(name); util.IsNumber(subbed) {
+					campaignUTM = subbed
+				} else if spaced := strings.Split(name, " "); len(spaced) > 1 && util.IsNumber(spaced[0]) {
+					campaignUTM = spaced[0]
+				} else if scored := strings.Split(name, "_"); len(scored) > 1 && util.IsNumber(scored[0]) {
+					campaignUTM = scored[0]
+				} else {
+					campaignUTM = id
+				}
+				m["utm_campaign"] = campaignUTM
+
+				var bytes []byte
+				if bytes, err = repo.Get("plumbus_fb_revenue", "campaign", campaignUTM); err != nil {
+					log.WithError(err).Error()
+				} else {
+					var payload map[string]interface{}
+					if err = json.Unmarshal(bytes, &payload); err != nil {
+						log.WithError(err).Error()
+					} else {
+						m["delineation"] = payload["account"]
+						m["revenue"] = payload["revenue"]
+						m["adset"] = payload["adset"]
+					}
+				}
+
+				got[id] = m
 			}
 
 			return got, nil
 
 		}
+
 	} else if a.campaignID != "" {
-		a.url += a.campaignID
+		a.url += "/" + a.campaignID
 	} else if a.adSetID != "" {
-		a.url += a.adSetID
+		a.url += "/" + a.adSetID
 	} else {
-		a.url += a.adID
+		a.url += "/" + a.adID
 	}
 
 	a.setToken()
 	a.setFields()
 
 	var err error
-	//var out []interface{}
-	//if out, err = get(url); err != nil {
-	//	log.WithError(err).Error()
-	//	return nil, err
-	//}
-	//
-	//util.PrettyPrint(out)
-	//
-	//var got = map[string]interface{}{}
-	//got["data"] = out
-
 	var res *http.Response
 	if res, err = http.Get(a.url); err != nil {
 		log.WithError(err).Error()
@@ -259,8 +289,6 @@ func (a *API) getAdAccounts() (map[string]interface{}, error) {
 	a.setToken()
 	a.setFields()
 
-	fmt.Println(a.url)
-
 	var err error
 	var out []interface{}
 	if out, err = get(a.url); err != nil {
@@ -268,26 +296,13 @@ func (a *API) getAdAccounts() (map[string]interface{}, error) {
 		return nil, err
 	}
 
-	var bytes []byte
-	if bytes, err = json.Marshal(&out); err != nil {
-		log.WithError(err).Error()
-		return nil, err
+	res := map[string]interface{}{}
+	for _, w := range out {
+		z := w.(map[string]interface{})
+		res[fmt.Sprintf("%v", z["account_id"])] = z
 	}
+	return res, nil
 
-	var accounts []struct {
-		AccountID string `json:"account_id"`
-	}
-
-	if err = json.Unmarshal(bytes, &accounts); err != nil {
-		log.WithError(err).Error()
-		return nil, err
-	}
-
-	var got = map[string]interface{}{}
-	for _, account := range accounts {
-		got[account.AccountID] = nil
-	}
-	return got, nil
 }
 
 func formatAccountData(got map[string]interface{}) {
@@ -311,7 +326,9 @@ func formatAccountData(got map[string]interface{}) {
 	}
 	if ko, ok := got["min_daily_budget"]; ok {
 		val := fmt.Sprintf("%v", ko)
-		if len(val) > 3 {
+		if val == "100" {
+			got["min_daily_budget_f"] = "$1.00"
+		} else if len(val) > 3 {
 			got["min_daily_budget_f"] = usd(val)
 		} else {
 			got["min_daily_budget_f"] = "$" + val + ".00"
@@ -376,4 +393,14 @@ func get(url string) (data []interface{}, err error) {
 
 	data = append(data, next...)
 	return
+}
+
+func getParenWrappedCampaignUTM(s string) string {
+	if chunks := strings.Split(s, "("); len(chunks) > 1 {
+		chunks = strings.Split(chunks[1], ")")
+		if len(chunks) > 1 {
+			return chunks[0]
+		}
+	}
+	return ""
 }

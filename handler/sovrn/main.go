@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	log "github.com/sirupsen/logrus"
 	"plumbus/pkg/api"
 	"plumbus/pkg/repo"
-	"plumbus/pkg/util"
 	"plumbus/pkg/util/logs"
 	"strings"
 )
@@ -24,28 +23,23 @@ func init() {
 }
 
 type Impressions struct {
-	Campaign string  `json:"impressions.utm_campaign"`
-	AdSet    string  `json:"impressions.utm_adset"`
-	Revenue  float64 `json:"impressions.estimated_revenue"`
-	Account  string  `json:"sovrn_account"`
+	Campaign    string  `json:"impressions.utm_campaign"`
+	AdSet       string  `json:"impressions.utm_adset"`
+	SubID       string  `json:"impressions.subid"`
+	Revenue     float64 `json:"impressions.estimated_revenue"`
+	Impressions int     `json:"impressions.total_ad_impressions"`
+	SessionsRPM float64 `json:"impressions.sessions_rpm"`
+	CTR         float64 `json:"impressions.click_through_rate"`
+	PageRPM     float64 `json:"impressions.page_rpm"`
+	Account     string  `json:"sovrn_account"`
 }
 
-func (i Impressions) toPutItemInput() *dynamodb.PutItemInput {
-
-	var rev = "0.0"
-	if i.Revenue > 0 {
-		rev = util.FloatToDecimal(i.Revenue)
-	}
-	rev = strings.ReplaceAll(rev, ",", "")
-
-	return &dynamodb.PutItemInput{
-		TableName: &table,
-		Item: map[string]types.AttributeValue{
-			"campaign": &types.AttributeValueMemberS{Value: i.Campaign},
-			"adset":    &types.AttributeValueMemberS{Value: i.AdSet},
-			"revenue":  &types.AttributeValueMemberN{Value: rev},
-			"account":  &types.AttributeValueMemberS{Value: i.Account},
-		},
+func (i *Impressions) toPutItemInput() *dynamodb.PutItemInput {
+	if item, err := attributevalue.MarshalMap(i); err != nil {
+		log.WithError(err).Error()
+		return nil
+	} else {
+		return &dynamodb.PutItemInput{TableName: &table, Item: item}
 	}
 }
 
@@ -71,20 +65,20 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 		return api.OK("")
 	}
 
-	account := impressions[0].Account
-
-	var out []interface{}
+	var out interface{}
 	if err = repo.ScanInputAndUnmarshal(&dynamodb.ScanInput{TableName: &table}, &out); err != nil {
 		log.WithError(err).Error()
 		return api.OK("")
 	}
 
-	for _, o := range out {
+	fmt.Println(out)
+
+	for _, o := range out.([]interface{}) {
 		if m, ok := o.(map[string]interface{}); !ok {
-			fmt.Println("want type map[string]interface{};  got %T", o)
+			fmt.Println("want type map[string]interface{};  got ", o)
 		} else {
 			acct := fmt.Sprintf("%v", m["account"])
-			if acct == "" || acct == account {
+			if acct == "" || acct == impressions[0].Account {
 				key := fmt.Sprintf("%v", m["campaign"])
 				if err = repo.DelByEntry(table, "campaign", key); err != nil {
 					log.WithError(err).Error("while deleting", key)

@@ -6,7 +6,7 @@ import (
 )
 
 func TestHandle(t *testing.T) {
-	if accounts, err := handle(); err != nil || len(accounts) == 0 {
+	if accounts, err := handle(); err != nil || accounts == nil {
 		t.Fail()
 	} else {
 		util.PrettyPrint(accounts)

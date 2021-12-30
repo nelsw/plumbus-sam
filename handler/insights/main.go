@@ -17,7 +17,7 @@ func init() {
 	logs.Init()
 }
 
-func handle() (out []interface{}, err error) {
+func handle() (out interface{}, err error) {
 	if err := repo.ScanInputAndUnmarshal(input, &out); err != nil {
 		log.WithError(err).Error()
 	}

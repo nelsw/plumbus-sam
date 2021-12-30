@@ -3,6 +3,7 @@ package svc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	faas "github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	"github.com/aws/smithy-go/ptr"
@@ -22,14 +23,17 @@ func init() {
 	logs.Init()
 }
 
-func Accounts() (out []interface{}, err error) {
-	var output *faas.InvokeOutput
-	if output, err = sam.Invoke(context.WithValue(context.TODO(), "accounts", ""), input); err != nil {
+func Accounts() ([]byte, error) {
+
+	in := input
+	in.Payload = []byte(`{"accounts":true}`)
+	if output, err := sam.Invoke(context.TODO(), in); err != nil {
 		log.WithError(err).Error()
-	} else if err = json.Unmarshal(output.Payload, &out); err != nil {
-		log.WithError(err).Error()
+		return nil, err
+	} else {
+		fmt.Println(string(output.Payload))
+		return output.Payload, nil
 	}
-	return
 }
 
 func AdAccountsToIgnoreMap() (out map[string]interface{}, err error) {
@@ -40,12 +44,14 @@ func AdAccountsToIgnoreMap() (out map[string]interface{}, err error) {
 		return nil, err
 	}
 
-	var payload []map[string]string
+	out = map[string]interface{}{}
+
+	var payload map[string]interface{}
 	if err = json.Unmarshal(invokeOutput.Payload, &payload); err != nil {
 		log.WithError(err).Error()
 	} else {
-		for _, account := range payload {
-			out[account["account_id"]] = nil
+		for k, v := range payload {
+			out[k] = v
 		}
 	}
 
@@ -60,12 +66,14 @@ func AdAccountsToIgnoreSlice() (out []string, err error) {
 		return
 	}
 
-	var payload []map[string]string
+	fmt.Println(string(invokeOutput.Payload))
+
+	var payload map[string]interface{}
 	if err = json.Unmarshal(invokeOutput.Payload, &payload); err != nil {
 		log.WithError(err).Error()
 	} else {
-		for _, account := range payload {
-			out = append(out, account["account_id"])
+		for k := range payload {
+			out = append(out, k)
 		}
 	}
 

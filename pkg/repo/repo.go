@@ -106,7 +106,7 @@ func ScanTable(table string) (*dynamodb.ScanOutput, error) {
 	return ScanInput(&dynamodb.ScanInput{TableName: &table})
 }
 
-func ScanInputAndUnmarshal(input *dynamodb.ScanInput, out interface{}) error {
+func ScanInputAndUnmarshal(input *dynamodb.ScanInput, out *interface{}) error {
 	if output, err := ScanInput(input); err != nil {
 		log.WithError(err).Error()
 		return err

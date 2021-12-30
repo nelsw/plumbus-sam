@@ -95,13 +95,8 @@ func accounts() (events.APIGatewayV2HTTPResponse, error) {
 
 	var err error
 
-	var out []interface{}
-	if out, err = svc.Accounts(); err != nil {
-		return api.Err(err)
-	}
-
 	var bytes []byte
-	if bytes, err = json.Marshal(&out); err != nil {
+	if bytes, err = svc.Accounts(); err != nil {
 		return api.Err(err)
 	}
 
