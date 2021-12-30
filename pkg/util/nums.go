@@ -1,7 +1,16 @@
 package util
 
-import "strconv"
+import (
+	"regexp"
+	"strconv"
+)
 import log "github.com/sirupsen/logrus"
+
+var digitRegexp = regexp.MustCompile(`^[0-9]+$`)
+
+func IsNumber(s string) bool {
+	return digitRegexp.MatchString(s)
+}
 
 func StringToFloat64(s string) float64 {
 	f, err := strconv.ParseFloat(s, 64)

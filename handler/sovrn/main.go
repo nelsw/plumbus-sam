@@ -27,6 +27,7 @@ type Impressions struct {
 	Campaign string  `json:"impressions.utm_campaign"`
 	AdSet    string  `json:"impressions.utm_adset"`
 	Revenue  float64 `json:"impressions.estimated_revenue"`
+	Account  string  `json:"sovrn_account"`
 }
 
 func (i Impressions) toPutItemInput() *dynamodb.PutItemInput {
@@ -43,6 +44,7 @@ func (i Impressions) toPutItemInput() *dynamodb.PutItemInput {
 			"campaign": &types.AttributeValueMemberS{Value: i.Campaign},
 			"adset":    &types.AttributeValueMemberS{Value: i.AdSet},
 			"revenue":  &types.AttributeValueMemberN{Value: rev},
+			"account":  &types.AttributeValueMemberS{Value: i.Account},
 		},
 	}
 }
@@ -69,6 +71,8 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 		return api.OK("")
 	}
 
+	account := impressions[0].Account
+
 	var out []interface{}
 	if err = repo.ScanInputAndUnmarshal(&dynamodb.ScanInput{TableName: &table}, &out); err != nil {
 		log.WithError(err).Error()
@@ -79,9 +83,12 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 		if m, ok := o.(map[string]interface{}); !ok {
 			fmt.Println("want type map[string]interface{};  got %T", o)
 		} else {
-			key := fmt.Sprintf("%v", m["campaign"])
-			if err = repo.DelByEntry(table, "campaign", key); err != nil {
-				log.WithError(err).Error("while deleting", key)
+			acct := fmt.Sprintf("%v", m["account"])
+			if acct == "" || acct == account {
+				key := fmt.Sprintf("%v", m["campaign"])
+				if err = repo.DelByEntry(table, "campaign", key); err != nil {
+					log.WithError(err).Error("while deleting", key)
+				}
 			}
 		}
 	}

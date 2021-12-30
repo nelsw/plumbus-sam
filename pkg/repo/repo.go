@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -24,6 +25,59 @@ func init() {
 	} else {
 		db = dynamodb.NewFromConfig(cfg)
 	}
+}
+
+func Get(table, key, val string) ([]byte, error) {
+
+	var err error
+
+	var output *dynamodb.GetItemOutput
+	var input = &dynamodb.GetItemInput{
+		TableName: &table,
+		Key:       map[string]types.AttributeValue{key: &types.AttributeValueMemberS{Value: val}},
+	}
+
+	if output, err = db.GetItem(ctx, input); err != nil {
+		log.WithError(err).Error()
+		return nil, err
+	}
+
+	var payload map[string]interface{}
+	if err = attributevalue.UnmarshalMap(output.Item, &payload); err != nil {
+		log.WithError(err).Error()
+		return nil, err
+	}
+
+	var bytes []byte
+	if bytes, err = json.Marshal(&payload); err != nil {
+		return nil, err
+	}
+
+	return bytes, nil
+}
+
+func Exists(table, key, val string) (bool, error) {
+
+	var err error
+	var output *dynamodb.GetItemOutput
+	var input = &dynamodb.GetItemInput{
+		TableName: &table,
+		Key:       map[string]types.AttributeValue{key: &types.AttributeValueMemberS{Value: val}},
+	}
+
+	if output, err = db.GetItem(ctx, input); err != nil {
+		log.WithError(err).Error()
+		return false, err
+	}
+
+	var payload map[string]interface{}
+	if err = attributevalue.UnmarshalMap(output.Item, &payload); err != nil {
+		log.WithError(err).Error()
+		return false, err
+	}
+
+	_, exists := payload[key]
+	return exists, nil
 }
 
 func DelByEntry(table, key, val string) error {
@@ -52,7 +106,7 @@ func ScanTable(table string) (*dynamodb.ScanOutput, error) {
 	return ScanInput(&dynamodb.ScanInput{TableName: &table})
 }
 
-func ScanInputAndUnmarshal(input *dynamodb.ScanInput, out *[]interface{}) error {
+func ScanInputAndUnmarshal(input *dynamodb.ScanInput, out interface{}) error {
 	if output, err := ScanInput(input); err != nil {
 		log.WithError(err).Error()
 		return err

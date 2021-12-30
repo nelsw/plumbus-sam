@@ -1,42 +1,21 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	faas "github.com/aws/aws-sdk-go-v2/service/lambda"
 	log "github.com/sirupsen/logrus"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"plumbus/pkg/api"
-	"regexp"
+	"plumbus/pkg/repo"
+	"plumbus/pkg/svc"
+	"plumbus/pkg/util"
+	"plumbus/pkg/util/logs"
 	"strings"
-	"sync"
-)
-
-const (
-	v12 = "https://graph.facebook.com/v12.0/"
-)
-
-var (
-	db          *dynamodb.Client
-	tableName   = "plumbus_fb_revenue"
-	digitCheck  = regexp.MustCompile(`^[0-9]+$`)
-	sam         *faas.Client
-	ctx         = context.TODO()
-	invokeInput = faas.InvokeInput{
-		FunctionName: aws.String("plumbus_accountHandler"),
-		LogType:      "Tail",
-	}
 )
 
 type Data struct {
@@ -77,10 +56,6 @@ type Data struct {
 	} `json:"picture"`
 }
 
-type Page struct {
-	Next string `json:"next"`
-}
-
 type Campaign struct {
 	CampaignID   string  `json:"campaign_id"`
 	CampaignName string  `json:"campaign_name"`
@@ -92,20 +67,7 @@ type Campaign struct {
 }
 
 func init() {
-
-	log.SetOutput(os.Stdout)
-	log.SetFormatter(&log.TextFormatter{
-		DisableColors: false,
-		FullTimestamp: true,
-		ForceColors:   true,
-	})
-
-	if cfg, err := config.LoadDefaultConfig(context.TODO()); err != nil {
-		log.WithError(err).Fatal()
-	} else {
-		db = dynamodb.NewFromConfig(cfg)
-		sam = faas.NewFromConfig(cfg)
-	}
+	logs.Init()
 }
 
 func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
@@ -114,125 +76,53 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 
 	domain := request.QueryStringParameters["domain"]
 	id := request.QueryStringParameters["id"]
-	tkn := os.Getenv("tkn")
 
 	switch domain {
 	case "acts":
-		return getAllAdAccounts()
+		return accounts()
 	case "camps":
-		return getAllCampaignInsights(id)
+		return campaigns(id)
 	case "ads":
-		return query(v12 + id + "/ads&access_token=" + tkn) // parent id
+		return query("https://graph.facebook.com/v12.0/" + id + "/ads&access_token=" + os.Getenv("tkn")) // parent id
 	case "ad":
-		return query(v12 + id + "&access_token=" + tkn) // entity id
+		return query("https://graph.facebook.com/v12.0/" + id + "&access_token=" + os.Getenv("tkn")) // entity id
 	default:
 		return api.Err(errors.New("unrecognized domain: " + domain))
 	}
 }
 
-type AdAccount struct {
-	ID          string     `json:"id"`
-	AccountID   string     `json:"account_id"`
-	Name        string     `json:"name"`
-	Age         float64    `json:"age"`
-	AmountSpent string     `json:"amount_spent"`
-	Status      int        `json:"account_status"`
-	Campaigns   []Campaign `json:"campaigns"`
-}
-
-func getAllAdAccounts() (events.APIGatewayV2HTTPResponse, error) {
-
-	base := "https://graph.facebook.com/v12.0/10158615602243295/adaccounts"
-	token := "?access_token=" + os.Getenv("tkn")
-	fields := "&fields=account_id,name,age,amount_spent,account_status"
-	url := base + token + fields
+func accounts() (events.APIGatewayV2HTTPResponse, error) {
 
 	var err error
-	var data []AdAccount
 
-	if data, err = getAdAccounts(url); err != nil {
-		log.WithError(err).Error()
+	var out []interface{}
+	if out, err = svc.Accounts(); err != nil {
 		return api.Err(err)
 	}
-
-	var invokeOutput *faas.InvokeOutput
-	if invokeOutput, err = sam.Invoke(ctx, &invokeInput); err != nil {
-		log.WithError(err).Error()
-		return api.Err(err)
-	}
-
-	var adAccountsToIgnore []map[string]string
-	if err = json.Unmarshal(invokeOutput.Payload, &adAccountsToIgnore); err != nil {
-		log.WithError(err).Error()
-		return api.Err(err)
-	}
-
-	accountsToIgnoreMap := map[string]interface{}{}
-	for _, accountToIgnore := range adAccountsToIgnore {
-		accountsToIgnoreMap[accountToIgnore["account_id"]] = nil
-	}
-
-	var wg sync.WaitGroup
-	for i, adAccount := range data {
-		key, val := accountsToIgnoreMap[adAccount.AccountID]
-		fmt.Println("key", key, "val", val)
-		wg.Add(1)
-		go func(i int, adAccount AdAccount) {
-			data[i].Campaigns = getAllCampaigns(adAccount.AccountID)
-			fmt.Println("data[i].Campaigns", data[i].Campaigns)
-			wg.Done()
-		}(i, adAccount)
-	}
-	wg.Wait()
 
 	var bytes []byte
-	if bytes, err = json.Marshal(&data); err != nil {
+	if bytes, err = json.Marshal(&out); err != nil {
 		return api.Err(err)
 	}
 
 	return api.OK(string(bytes))
 }
 
-func getAdAccounts(url string) (data []AdAccount, err error) {
+func campaigns(id string) (events.APIGatewayV2HTTPResponse, error) {
 
-	var res *http.Response
-	if res, err = http.Get(url); err != nil {
-		log.WithError(err).Error()
-		return
+	var err error
+
+	var out []interface{}
+	if out, err = svc.Campaigns(id); err != nil {
+		return api.Err(err)
 	}
 
-	var body []byte
-	if body, err = ioutil.ReadAll(res.Body); err != nil {
-		log.WithError(err).Error()
-		return
+	var bytes []byte
+	if bytes, err = json.Marshal(&out); err != nil {
+		return api.Err(err)
 	}
 
-	fmt.Println(string(body))
-
-	var payload struct {
-		Data []AdAccount `json:"data"`
-		Page struct {
-			Next string `json:"next"`
-		} `json:"paging"`
-	}
-
-	if err = json.Unmarshal(body, &payload); err != nil {
-		log.WithError(err).Error()
-		return
-	}
-
-	if data = append(payload.Data); payload.Page.Next == "" {
-		return
-	}
-
-	var next []AdAccount
-	if next, err = getAdAccounts(payload.Page.Next); err != nil {
-		log.WithError(err).Error()
-		return
-	}
-
-	data = append(data, next...)
-	return data, nil
+	return api.OK(string(bytes))
 }
 
 func getCampaignsStatus(campaignID string) string {
@@ -246,12 +136,13 @@ func getCampaignsStatus(campaignID string) string {
 
 	var res *http.Response
 	if res, err = http.Get(url); err != nil {
-		fmt.Println(err)
+		log.WithError(err).Error()
 		return ""
 	}
 
 	var body []byte
 	if body, err = ioutil.ReadAll(res.Body); err != nil {
+		log.WithError(err).Error()
 		return ""
 	}
 
@@ -260,6 +151,7 @@ func getCampaignsStatus(campaignID string) string {
 	}
 
 	if err = json.Unmarshal(body, &payload); err != nil {
+		log.WithError(err).Error()
 		return ""
 	}
 
@@ -273,11 +165,11 @@ func getCampaignRevenue(id1, id2 string) float64 {
 
 	if rev, err = getRevenue(id1); err != nil || rev < 0 {
 		if err != nil {
-			fmt.Println(id1, err)
+			log.WithError(err).Error("while getting revenue by fb camp id", id1)
 		}
 		if rev, err = getRevenue(id2); err != nil || rev < 0 {
 			if err != nil {
-				fmt.Println(id2, err)
+				log.WithError(err).Error("while getting revenue by sovrn id", id2)
 			}
 			return -1
 		}
@@ -288,31 +180,31 @@ func getCampaignRevenue(id1, id2 string) float64 {
 
 func getRevenue(id string) (float64, error) {
 
-	out, err := db.GetItem(context.TODO(), &dynamodb.GetItemInput{
-		Key:       map[string]types.AttributeValue{"campaign": &types.AttributeValueMemberS{Value: id}},
-		TableName: &tableName,
-	})
+	var bytes []byte
+	var err error
 
-	if err != nil {
-		log.WithFields(log.Fields{"err": err}).Error()
+	if bytes, err = repo.Get("plumbus_fb_revenue", "campaign", id); err != nil {
+		log.WithError(err).Error()
 		return -1, err
 	}
 
 	var r struct {
+		Account  string  `json:"account"`
 		Campaign string  `json:"campaign"`
+		AdSet    string  `json:"adset"`
 		Revenue  float64 `json:"revenue"`
 	}
 
-	if err = attributevalue.UnmarshalMap(out.Item, &r); err != nil {
-		log.WithFields(log.Fields{"err": err}).Error()
+	if err = json.Unmarshal(bytes, &r); err != nil {
+		log.WithError(err).Error()
 		return -1, err
 	}
 
-	if r.Campaign == "" {
+	if rev := r.Revenue; rev == 0 && r.Campaign == "" {
 		return -1, nil
+	} else {
+		return rev, nil
 	}
-
-	return r.Revenue, nil
 }
 
 func getAllCampaigns(accountID string) []Campaign {
@@ -332,18 +224,34 @@ func getAllCampaigns(accountID string) []Campaign {
 
 	for i, d := range data {
 		id1 := d.CampaignID
-		id2 := d.CampaignID
-		if spaced := strings.Split(d.CampaignName, " "); len(spaced) > 1 && digitCheck.MatchString(spaced[0]) {
-			id2 = spaced[0]
-		} else if scored := strings.Split(d.CampaignName, "_"); len(scored) > 1 && digitCheck.MatchString(scored[0]) {
-			id2 = scored[0]
+
+		sovrnCampaignID := getParenWrappedSovrnID(d.CampaignName)
+		if sovrnCampaignID == "" {
+			if spaced := strings.Split(d.CampaignName, " "); len(spaced) > 1 && util.IsNumber(spaced[0]) {
+				sovrnCampaignID = spaced[0]
+			} else if scored := strings.Split(d.CampaignName, "_"); len(scored) > 1 && util.IsNumber(scored[0]) {
+				sovrnCampaignID = scored[0]
+			} else {
+				sovrnCampaignID = d.CampaignID
+			}
 		}
 
-		data[i].Revenue = getCampaignRevenue(id1, id2)
+		data[i].Revenue = getCampaignRevenue(id1, sovrnCampaignID)
 		data[i].Status = getCampaignsStatus(d.CampaignID)
 	}
 
 	return data
+}
+
+func getParenWrappedSovrnID(s string) string {
+	if chunks := strings.Split(s, "("); len(chunks) > 1 {
+		chunk := chunks[1]
+		chunks = strings.Split(chunk, ")")
+		if len(chunks) > 1 {
+			return chunks[0]
+		}
+	}
+	return ""
 }
 
 func getAllCampaignInsights(accountID string) (events.APIGatewayV2HTTPResponse, error) {
@@ -365,9 +273,9 @@ func getAllCampaignInsights(accountID string) (events.APIGatewayV2HTTPResponse, 
 	for i, d := range data {
 		id1 := d.CampaignID
 		id2 := d.CampaignID
-		if spaced := strings.Split(d.CampaignName, " "); len(spaced) > 1 && digitCheck.MatchString(spaced[0]) {
+		if spaced := strings.Split(d.CampaignName, " "); len(spaced) > 1 && util.IsNumber(spaced[0]) {
 			id2 = spaced[0]
-		} else if scored := strings.Split(d.CampaignName, "_"); len(scored) > 1 && digitCheck.MatchString(scored[0]) {
+		} else if scored := strings.Split(d.CampaignName, "_"); len(scored) > 1 && util.IsNumber(scored[0]) {
 			id2 = scored[0]
 		}
 
@@ -451,19 +359,21 @@ func get(url string) (data []Data, err error) {
 
 	var payload struct {
 		Data []Data `json:"data"`
-		Page `json:"paging"`
+		Page struct {
+			Next string `json:"next"`
+		} `json:"paging"`
 	}
 
 	if err = json.Unmarshal(body, &payload); err != nil {
 		return
 	}
 
-	if data = append(payload.Data); payload.Next == "" {
+	if data = append(payload.Data); payload.Page.Next == "" {
 		return
 	}
 
 	var next []Data
-	if next, err = get(payload.Next); err != nil {
+	if next, err = get(payload.Page.Next); err != nil {
 		return
 	}
 

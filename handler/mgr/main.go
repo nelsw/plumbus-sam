@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"plumbus/pkg/api"
+	"plumbus/pkg/repo"
 	"plumbus/pkg/svc"
 	"plumbus/pkg/util"
 	"regexp"
@@ -28,7 +29,7 @@ import (
 
 var (
 	db         *dynamodb.Client
-	tableName  = "plumbus_fb_revenue"
+	table      = "plumbus_fb_revenue"
 	mutex      = &sync.Mutex{}
 	digitCheck = regexp.MustCompile(`^[0-9]+$`)
 	ctx        = context.TODO()
@@ -218,7 +219,7 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 	})
 
 	var out *dynamodb.ScanOutput
-	if out, err = db.Scan(context.TODO(), &dynamodb.ScanInput{TableName: &tableName}); err != nil {
+	if out, err = db.Scan(context.TODO(), &dynamodb.ScanInput{TableName: &table}); err != nil {
 		return api.Err(err)
 	}
 
@@ -256,11 +257,11 @@ func getRevenue(id string) (float64, error) {
 
 	out, err := db.GetItem(context.TODO(), &dynamodb.GetItemInput{
 		Key:       map[string]types.AttributeValue{"campaign": &types.AttributeValueMemberS{Value: id}},
-		TableName: &tableName,
+		TableName: &table,
 	})
 
 	if err != nil {
-		log.WithFields(log.Fields{"err": err}).Error()
+		log.WithError(err).Error()
 		return -1, err
 	}
 
@@ -270,7 +271,7 @@ func getRevenue(id string) (float64, error) {
 	}
 
 	if err = attributevalue.UnmarshalMap(out.Item, &r); err != nil {
-		log.WithFields(log.Fields{"err": err}).Error()
+		log.WithError(err).Error()
 		return -1, err
 	}
 
@@ -279,6 +280,11 @@ func getRevenue(id string) (float64, error) {
 	}
 
 	return r.Revenue, nil
+}
+
+func remove(slice []AdAccount, i int) []AdAccount {
+	copy(slice[i:], slice[i+1:])
+	return slice[:len(slice)-1]
 }
 
 func getAllAdAccounts(accountsToIgnoreMap map[string]interface{}) []CampaignGuard {
@@ -296,11 +302,16 @@ func getAllAdAccounts(accountsToIgnoreMap map[string]interface{}) []CampaignGuar
 		panic(err)
 	}
 
-	var activeAdAccounts []AdAccount
-	for _, adAccount := range data {
-		if _, ok := accountsToIgnoreMap[adAccount.ID]; ok {
-			continue
+	var valid []AdAccount
+
+	for i, d := range data {
+		if _, ok := accountsToIgnoreMap[d.AccountID]; !ok {
+			valid = append(valid, data[i])
 		}
+	}
+
+	var activeAdAccounts []AdAccount
+	for _, adAccount := range valid {
 		if adAccount.Status == 1 || adAccount.Status == 201 {
 			activeAdAccounts = append(activeAdAccounts, adAccount)
 		}
@@ -314,17 +325,27 @@ func getAllAdAccounts(accountsToIgnoreMap map[string]interface{}) []CampaignGuar
 
 		for _, adSet := range getAllAdSetInsights(accountID) {
 
-			if f, err = strconv.ParseFloat(adSet.Spend, 64); err != nil {
-				PrettyPrint(adSet)
-				fmt.Println(err)
+			if _, ok := accountsToIgnoreMap[accountID]; ok {
+				if err = repo.DelByEntry("plumbus_mgr", "facebook", adSet.CampaignID); err != nil {
+					log.WithError(err).Error("while deleting adSet from mgr", adSet)
+				}
 				continue
 			}
 
-			sovrnCampaignID := adSet.CampaignID
-			if spaced := strings.Split(adSet.CampaignName, " "); len(spaced) > 1 && digitCheck.MatchString(spaced[0]) {
-				sovrnCampaignID = spaced[0]
-			} else if scored := strings.Split(adSet.CampaignName, "_"); len(scored) > 1 && digitCheck.MatchString(scored[0]) {
-				sovrnCampaignID = scored[0]
+			if f, err = strconv.ParseFloat(adSet.Spend, 64); err != nil {
+				log.WithError(err).Error("while parsing adSet.Spend for", adSet)
+				continue
+			}
+
+			sovrnCampaignID := getParenWrappedSovrnID(adSet.CampaignID)
+			if sovrnCampaignID == "" {
+				if spaced := strings.Split(adSet.CampaignName, " "); len(spaced) > 1 && digitCheck.MatchString(spaced[0]) {
+					sovrnCampaignID = spaced[0]
+				} else if scored := strings.Split(adSet.CampaignName, "_"); len(scored) > 1 && digitCheck.MatchString(scored[0]) {
+					sovrnCampaignID = scored[0]
+				} else {
+					sovrnCampaignID = adSet.CampaignID
+				}
 			}
 
 			guards = append(guards, CampaignGuard{
@@ -341,6 +362,17 @@ func getAllAdAccounts(accountsToIgnoreMap map[string]interface{}) []CampaignGuar
 	})
 
 	return guards
+}
+
+func getParenWrappedSovrnID(s string) string {
+	if chunks := strings.Split(s, "("); len(chunks) > 1 {
+		chunk := chunks[1]
+		chunks = strings.Split(chunk, ")")
+		if len(chunks) > 1 {
+			return chunks[0]
+		}
+	}
+	return ""
 }
 
 func getActiveCampaigns(activeAdAccounts []AdAccount) map[string][]Campaign {

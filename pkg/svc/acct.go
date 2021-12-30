@@ -3,82 +3,71 @@ package svc
 import (
 	"context"
 	"encoding/json"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	faas "github.com/aws/aws-sdk-go-v2/service/lambda"
+	"github.com/aws/aws-sdk-go-v2/service/lambda/types"
+	"github.com/aws/smithy-go/ptr"
 	log "github.com/sirupsen/logrus"
-	"os"
+	"plumbus/pkg/util/logs"
 )
 
 var (
-	sam         *faas.Client
-	ctx         = context.TODO()
-	invokeInput = faas.InvokeInput{
-		FunctionName: aws.String("plumbus_accountHandler"),
-		LogType:      "Tail",
+	input = &faas.InvokeInput{
+		FunctionName:   ptr.String("plumbus_accountHandler"),
+		InvocationType: types.InvocationTypeRequestResponse,
+		LogType:        types.LogTypeTail,
 	}
 )
 
 func init() {
+	logs.Init()
+}
 
-	log.SetOutput(os.Stdout)
-	log.SetFormatter(&log.TextFormatter{
-		DisableColors: false,
-		FullTimestamp: true,
-		ForceColors:   true,
-	})
+func Accounts() (out []interface{}, err error) {
+	var output *faas.InvokeOutput
+	if output, err = sam.Invoke(context.WithValue(context.TODO(), "accounts", ""), input); err != nil {
+		log.WithError(err).Error()
+	} else if err = json.Unmarshal(output.Payload, &out); err != nil {
+		log.WithError(err).Error()
+	}
+	return
+}
 
-	if cfg, err := config.LoadDefaultConfig(ctx); err != nil {
-		log.WithError(err).Fatal()
+func AdAccountsToIgnoreMap() (out map[string]interface{}, err error) {
+
+	var invokeOutput *faas.InvokeOutput
+	if invokeOutput, err = sam.Invoke(context.TODO(), input); err != nil {
+		log.WithError(err).Error()
+		return nil, err
+	}
+
+	var payload []map[string]string
+	if err = json.Unmarshal(invokeOutput.Payload, &payload); err != nil {
+		log.WithError(err).Error()
 	} else {
-		sam = faas.NewFromConfig(cfg)
+		for _, account := range payload {
+			out[account["account_id"]] = nil
+		}
 	}
+
+	return
 }
 
-func AdAccountsToIgnoreMap() (map[string]interface{}, error) {
-
-	var err error
+func AdAccountsToIgnoreSlice() (out []string, err error) {
 
 	var invokeOutput *faas.InvokeOutput
-	if invokeOutput, err = sam.Invoke(ctx, &invokeInput); err != nil {
+	if invokeOutput, err = sam.Invoke(context.TODO(), input); err != nil {
 		log.WithError(err).Error()
-		return nil, err
+		return
 	}
 
 	var payload []map[string]string
 	if err = json.Unmarshal(invokeOutput.Payload, &payload); err != nil {
 		log.WithError(err).Error()
-		return nil, err
+	} else {
+		for _, account := range payload {
+			out = append(out, account["account_id"])
+		}
 	}
 
-	out := map[string]interface{}{}
-	for _, account := range payload {
-		out[account["account_id"]] = nil
-	}
-
-	return out, nil
-}
-
-func AdAccountsToIgnoreSlice() ([]string, error) {
-
-	var err error
-
-	var invokeOutput *faas.InvokeOutput
-	if invokeOutput, err = sam.Invoke(ctx, &invokeInput); err != nil {
-		log.WithError(err).Error()
-		return nil, err
-	}
-
-	var payload []map[string]string
-	if err = json.Unmarshal(invokeOutput.Payload, &payload); err != nil {
-		log.WithError(err).Error()
-		return nil, err
-	}
-
-	var out []string
-	for _, account := range payload {
-		out = append(out, account["account_id"])
-	}
-
-	return out, nil
+	return
 }
