@@ -251,41 +251,53 @@ func (a *API) Marketing() *API {
 }
 
 type CampaignPayload struct {
-	AccountID         string         `json:"account_id"`
-	CampaignID        string         `json:"campaign_id"`
-	CampaignUTM       string         `json:"campaign_utm"`
-	CampaignName      string         `json:"campaign_name"`
-	Spend             float64        `json:"spend"`
-	SpendF            string         `json:"spend_f"`
-	Revenue           float64        `json:"revenue"`
-	RevenueF          string         `json:"revenue_f"`
-	Profit            float64        `json:"profit"`
-	ProfitF           string         `json:"profit_f"`
-	SovrnCTR          float64        `json:"sovrn_ctr"`
-	SovrnCTRF         string         `json:"sovrn_ctrf"`
-	FBCTR             float64        `json:"fb_ctr"`
-	FBCTRF            string         `json:"fb_ctrf"`
-	CPC               float64        `json:"cpc"`
-	CPCF              string         `json:"cpcf"`
-	CPM               float64        `json:"cpm"`
-	CPMF              string         `json:"cpmf"`
-	CPP               float64        `json:"cpp"`
-	CPPF              string         `json:"cppf"`
-	SessionsRPM       float64        `json:"sessions_rpm"`
-	SessionsRPMF      string         `json:"sessions_rpmf"`
-	PageRPM           float64        `json:"page_rpm"`
-	PageRPMF          string         `json:"page_rpmf"`
-	ECPM              float64        `json:"ecpm"`
-	ECPMF             string         `json:"ecpmf"`
-	FBImpressions     int            `json:"fb_impressions"`
-	FBImpressionsF    string         `json:"fb_impressions_f"`
-	SovrnImpressions  float64        `json:"sovrn_impressions"`
-	SovrnImpressionsF string         `json:"sovrn_impressions_f"`
-	Delineation       string         `json:"delineation"`
-	Created           string         `json:"created"`
-	Updated           string         `json:"updated"`
-	RevenueTracked    bool           `json:"revenue_tracked"`
-	Data              []CampaignData `json:"data"`
+	AccountID    string `json:"account_id"`
+	CampaignID   string `json:"campaign_id"`
+	CampaignUTM  string `json:"campaign_utm"`
+	CampaignName string `json:"campaign_name"`
+
+	Spend  float64 `json:"spend"`
+	SpendF string  `json:"spend_f"`
+
+	Revenue  float64 `json:"revenue"`
+	RevenueF string  `json:"revenue_f"`
+
+	Profit  float64 `json:"profit"`
+	ProfitF string  `json:"profit_f"`
+
+	SovrnCTR  float64 `json:"sovrn_ctr"`
+	SovrnCTRF string  `json:"sovrn_ctr_f"`
+
+	FBCTR  float64 `json:"fb_ctr"`
+	FBCTRF string  `json:"fb_ctr_f"`
+
+	CPC  float64 `json:"cpc"`
+	CPCF string  `json:"cpc_f"`
+
+	CPM  float64 `json:"cpm"`
+	CPMF string  `json:"cpm_f"`
+
+	CPP  float64 `json:"cpp"`
+	CPPF string  `json:"cpp_f"`
+
+	Sessions  float64 `json:"sessions"`
+	SessionsF string  `json:"sessions_f"`
+
+	PageViews  float64 `json:"page_views"`
+	PageViewsF string  `json:"page_views_f"`
+
+	FBImpressions  int    `json:"fb_impressions"`
+	FBImpressionsF string `json:"fb_impressions_f"`
+
+	SovrnImpressions  float64 `json:"sovrn_impressions"`
+	SovrnImpressionsF string  `json:"sovrn_impressions_f"`
+
+	Created string `json:"created"`
+	Updated string `json:"updated"`
+
+	RevenueTracked bool `json:"revenue_tracked"`
+
+	Data []CampaignData `json:"data"`
 }
 
 func NewCampaignPayload(data []CampaignData) CampaignPayload {
@@ -316,14 +328,14 @@ func NewCampaignPayload(data []CampaignData) CampaignPayload {
 		p.SpendF = usd.FormatMoney(p.Spend)
 	}
 
+	if p.FBImpressionsF = "0"; p.FBImpressions > 0 {
+		p.FBImpressionsF = dec.FormatMoney(p.FBImpressions)
+	}
+
 	qty := decimal.NewFromFloat(float64(len(data)))
 
 	if p.FBCTRF = zeroPCT; p.FBCTR > 0 {
 		p.FBCTRF = pct.FormatMoneyDecimal(decimal.NewFromFloat(p.FBCTR).Div(qty).Truncate(2))
-	}
-
-	if p.FBImpressionsF = "0"; p.FBImpressions > 0 {
-		p.FBImpressionsF = dec.FormatMoney(decimal.NewFromFloat(float64(p.FBImpressions)).Div(qty).Truncate(2))
 	}
 
 	if p.CPMF = zeroUSD; p.CPM > 0 {
@@ -351,67 +363,50 @@ func NewCampaignPayload(data []CampaignData) CampaignPayload {
 	var err error
 	var bytes []byte
 
-	if bytes, err = repo.Get("plumbus_fb_revenue", "impressions.utm_campaign", p.CampaignUTM); err != nil {
+	if bytes, err = repo.Get("plumbus_fb_sovrn", "campaign", p.CampaignUTM); err != nil {
 		log.Trace(err)
 		return p
 	}
 
-	var payload map[string]interface{}
-	if err = json.Unmarshal(bytes, &payload); err != nil {
+	var m map[string]interface{}
+	if err = json.Unmarshal(bytes, &m); err != nil {
 		log.WithError(err).Error()
 		return p
 	}
 
-	if p.RevenueTracked = len(payload) > 0; !p.RevenueTracked {
+	if p.RevenueTracked = len(m) > 0; !p.RevenueTracked {
 		log.Trace("missing revenue for campaign ", p)
 		return p
 	}
 
-	if p.RevenueF = zeroUSD; payload["impressions.estimated_revenue"] != nil {
-		if p.Revenue = payload["impressions.estimated_revenue"].(float64); p.Revenue > 0 {
+	if p.RevenueF = zeroUSD; m["revenue"] != nil {
+		if p.Revenue = m["revenue"].(float64); p.Revenue > 0 {
 			p.RevenueF = usd.FormatMoneyFloat64(p.Revenue)
 		}
 	}
 
-	if p.SovrnCTRF = zeroPCT; payload["impressions.click_through_rate"] != nil {
-		if p.SovrnCTR, err = strconv.ParseFloat(payload["impressions.click_through_rate"].(string), 64); err != nil {
-			log.Trace(err)
-			p.SovrnCTR = 0
-		}
-		if p.SovrnCTR > 0 {
+	if p.SovrnCTRF = zeroPCT; m["ctr"] != nil {
+		if p.SovrnCTR = m["ctr"].(float64); p.SovrnCTR > 0 {
 			pct.FormatMoneyFloat64(p.SovrnCTR)
 		}
 	}
 
-	if p.SessionsRPMF = zeroUSD; payload["impressions.sessions_rpm"] != nil {
-		if p.SessionsRPM = payload["impressions.sessions_rpm"].(float64); p.SessionsRPM > 0 {
-			p.SessionsRPMF = usd.FormatMoneyFloat64(p.SessionsRPM)
+	if p.SessionsF = zeroUSD; m["sessions"] != nil {
+		if p.Sessions = m["sessions"].(float64); p.Sessions > 0 {
+			p.SessionsF = usd.FormatMoney(p.Sessions)
 		}
 	}
 
-	if p.PageRPMF = zeroUSD; payload["impressions.page_rpm"] != nil {
-		if p.PageRPM, err = strconv.ParseFloat(payload["impressions.page_rpm"].(string), 64); err != nil {
-			log.Trace(err)
-		}
-		if p.PageRPM > 0 {
-			p.PageRPMF = usd.FormatMoneyFloat64(p.PageRPM)
+	if p.PageViewsF = zeroUSD; m["page_views"] != nil {
+		if p.PageViews = m["page_views"].(float64); p.PageViews > 0 {
+			p.PageViewsF = usd.FormatMoney(p.PageViews)
 		}
 	}
 
-	if p.ECPMF = zeroUSD; payload["impressions.ad_epm"] != nil {
-		if p.ECPM = payload["impressions.ad_epm"].(float64); p.ECPM > 0 {
-			p.ECPMF = usd.FormatMoneyFloat64(p.ECPM)
-		}
-	}
-
-	if p.SovrnImpressionsF = "0"; payload["impressions.total_ad_impressions"] != nil {
-		if p.SovrnImpressions = payload["impressions.total_ad_impressions"].(float64); p.SovrnImpressions > 0 {
+	if p.SovrnImpressionsF = "0"; m["impressions"] != nil {
+		if p.SovrnImpressions = m["impressions"].(float64); p.SovrnImpressions > 0 {
 			p.SovrnImpressionsF = num.FormatMoneyFloat64(p.SovrnImpressions)
 		}
-	}
-
-	if payload["sovrn_account"] != nil {
-		p.Delineation = payload["sovrn_account"].(string)
 	}
 
 	if p.Profit = p.Revenue - p.Spend; p.Profit != 0 {
@@ -430,13 +425,13 @@ type CampaignData struct {
 	Clicks       int       `json:"clicks"`
 	ClicksF      string    `json:"clicks_f"`
 	CTR          float64   `json:"ctr"`
-	CTRF         string    `json:"ctrf"`
+	CTRF         string    `json:"ctr_f"`
 	CPC          float64   `json:"cpc"`
-	CPCF         string    `json:"cpcf"`
+	CPCF         string    `json:"cpc_f"`
 	CPM          float64   `json:"cpm"`
-	CPMF         string    `json:"cpmf"`
+	CPMF         string    `json:"cpm_f"`
 	CPP          float64   `json:"cpp"`
-	CPPF         string    `json:"cppf"`
+	CPPF         string    `json:"cpp_f"`
 	Impressions  int       `json:"impressions"`
 	ImpressionsF string    `json:"impressions_f"`
 	Spend        float64   `json:"spend"`
@@ -685,21 +680,18 @@ func (a *API) GET() (map[string]interface{}, error) {
 			m["utm_campaign"] = campaignUTM
 
 			var bytes []byte
-			if bytes, err = repo.Get("plumbus_fb_revenue", "impressions.utm_campaign", campaignUTM); err != nil {
+			if bytes, err = repo.Get("plumbus_fb_sovrn", "campaign", campaignUTM); err != nil {
 				log.WithError(err).Error()
 			} else {
 				var payload map[string]interface{}
 				if err = json.Unmarshal(bytes, &payload); err != nil {
 					log.WithError(err).Error()
 				} else {
-					m["adset"] = payload["impressions.utm_adset"]
-					m["subid"] = payload["impressions.utm_subid"]
-					m["revenue"] = payload["impressions.estimated_revenue"]
-					m["impressions"] = payload["impressions.total_ad_impressions"]
-					m["sessions_rpm"] = payload["impressions.sessions_rpm"]
-					m["ctr"] = payload["impressions.click_through_rate"]
-					m["page_rpm"] = payload["impressions.page_rpm"]
-					m["delineation"] = payload["sovrn_account"]
+					m["revenue"] = payload["revenue"]
+					m["impressions"] = payload["impressions"]
+					m["sessions"] = payload["sessions"]
+					m["ctr"] = payload["ctr"]
+					m["page_views"] = payload["page_views"]
 				}
 			}
 

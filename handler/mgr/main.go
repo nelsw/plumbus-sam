@@ -30,7 +30,7 @@ import (
 
 var (
 	db         *dynamodb.Client
-	table      = "plumbus_fb_revenue"
+	table      = "plumbus_fb_sovrn"
 	mutex      = &sync.Mutex{}
 	digitCheck = regexp.MustCompile(`^[0-9]+$`)
 	ctx        = context.TODO()

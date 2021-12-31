@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
@@ -10,111 +11,122 @@ import (
 	log "github.com/sirupsen/logrus"
 	"plumbus/pkg/api"
 	"plumbus/pkg/repo"
-	"plumbus/pkg/util"
 	"plumbus/pkg/util/logs"
 	"strconv"
 	"strings"
+	"time"
 )
 
-var (
-	table = "plumbus_fb_revenue"
-)
+var table = "plumbus_fb_sovrn"
 
 func init() {
 	logs.Init()
 }
 
-type Impressions struct {
+type Payload struct {
+	Attachment struct {
+		Data string `json:"data"`
+	} `json:"attachment"`
+}
+
+type Value struct {
 	Campaign    string  `json:"impressions.utm_campaign"`
-	AdSet       string  `json:"impressions.utm_adset"`
-	SubID       string  `json:"impressions.subid"`
 	Revenue     float64 `json:"impressions.estimated_revenue"`
 	Impressions int     `json:"impressions.total_ad_impressions"`
-	SessionsRPM float64 `json:"impressions.sessions_rpm"`
+	Sessions    int     `json:"impressions.total_sessions"`
 	CTR         float64 `json:"impressions.click_through_rate"`
-	PageRPM     float64 `json:"impressions.page_rpm"`
-	Account     string  `json:"sovrn_account"`
+	PageViews   int     `json:"impressions.total_page_views"`
 }
 
-func (i *Impressions) toPutItemInput() *dynamodb.PutItemInput {
-	//if item, err := attributevalue.MarshalMap(i); err != nil {
-	//	return nil
-	//} else {
-	//	return &dynamodb.PutItemInput{TableName: &table, Item: item}
-	//}
-
-	return &dynamodb.PutItemInput{
-		TableName: &table,
-		Item: map[string]types.AttributeValue{
-			"impressions.utm_campaign":         &types.AttributeValueMemberS{Value: i.Campaign},
-			"impressions.utm_adset":            &types.AttributeValueMemberS{Value: i.AdSet},
-			"impressions.subid":                &types.AttributeValueMemberS{Value: i.SubID},
-			"impressions.estimated_revenue":    &types.AttributeValueMemberN{Value: util.FloatToDecimal(i.Revenue)},
-			"impressions.total_ad_impressions": &types.AttributeValueMemberN{Value: strconv.Itoa(i.Impressions)},
-			"impressions.sessions_rpm":         &types.AttributeValueMemberN{Value: util.FloatToDecimal(i.SessionsRPM)},
-			"impressions.click_through_rate":   &types.AttributeValueMemberS{Value: util.FloatToDecimal(i.CTR)},
-			"impressions.page_rpm":             &types.AttributeValueMemberS{Value: util.FloatToDecimal(i.PageRPM)},
-			"sovrn_account":                    &types.AttributeValueMemberS{Value: i.Account},
-		},
-	}
-}
-
-func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+func handle(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 
 	log.WithFields(log.Fields{"req": request}).Info()
 
 	var err error
 
-	var payload struct {
-		Attachment struct {
-			Data string `json:"data"`
-		} `json:"attachment"`
-	}
+	var payload Payload
 	if err = json.Unmarshal([]byte(strings.TrimLeft(request.Body, "attachment")), &payload); err != nil {
 		log.WithError(err).Error()
 		return api.OK("")
 	}
 
-	var impressions []Impressions
-	if err = json.Unmarshal([]byte(payload.Attachment.Data), &impressions); err != nil {
+	var values []Value
+	if err = json.Unmarshal([]byte(payload.Attachment.Data), &values); err != nil {
 		log.WithError(err).Error()
 		return api.OK("")
 	}
 
-	fmt.Println("impressions", impressions)
-	util.PrettyPrint(impressions)
+	groups := map[string][]Value{}
+	for _, value := range values {
 
-	var out interface{}
-	if err = repo.ScanInputAndUnmarshal(&dynamodb.ScanInput{TableName: &table}, &out); err != nil {
-		log.WithError(err).Error()
-		return api.OK("")
-	}
+		if value.Campaign == "" {
+			log.Trace("value missing campaign id", value)
+			value.Campaign = time.Now().UTC().Format(time.RFC3339)
+		}
 
-	fmt.Println(out)
-
-	if len(out.([]interface{})) > 0 {
-		for _, o := range out.([]interface{}) {
-			if m, ok := o.(map[string]interface{}); !ok {
-				fmt.Println("want type map[string]interface{};  got ", o)
-			} else {
-				acct := fmt.Sprintf("%v", m["account"])
-				if acct == "" || acct == impressions[0].Account {
-					key := fmt.Sprintf("%v", m["campaign"])
-					if err = repo.DelByEntry(table, "campaign", key); err != nil {
-						log.WithError(err).Error("while deleting", key)
-					}
-				}
-			}
+		if _, ok := groups[value.Campaign]; ok {
+			groups[value.Campaign] = append(groups[value.Campaign], value)
+		} else {
+			groups[value.Campaign] = []Value{value}
 		}
 	}
 
-	for _, impression := range impressions {
-		if err = repo.Put(impression.toPutItemInput()); err != nil {
+	var requests []types.WriteRequest
+	for id, group := range groups {
+
+		var rev, ctr float64
+		var imp, ses, pge int
+
+		for _, g := range group {
+			rev += g.Revenue
+			ctr += g.CTR
+			imp += g.Impressions
+			ses += g.Sessions
+			pge += g.PageViews
+		}
+
+		ctr /= float64(len(group))
+
+		requests = append(requests, types.WriteRequest{
+			PutRequest: &types.PutRequest{
+				Item: map[string]types.AttributeValue{
+					"campaign":    &types.AttributeValueMemberS{Value: id},
+					"revenue":     &types.AttributeValueMemberN{Value: fmt.Sprintf("%f", rev)},
+					"impressions": &types.AttributeValueMemberN{Value: strconv.Itoa(imp)},
+					"sessions":    &types.AttributeValueMemberN{Value: strconv.Itoa(ses)},
+					"ctr":         &types.AttributeValueMemberN{Value: fmt.Sprintf("%f", ctr)},
+					"page_views":  &types.AttributeValueMemberN{Value: strconv.Itoa(pge)},
+				},
+			},
+		})
+	}
+
+	var in *dynamodb.BatchWriteItemInput
+	for _, chunk := range chunkSlice(requests, 25) {
+		in = &dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{table: chunk}}
+		if _, err = repo.BatchWriteItem(ctx, in); err != nil {
 			log.WithError(err).Error()
 		}
 	}
 
 	return api.OK("")
+}
+
+func chunkSlice(slice []types.WriteRequest, size int) [][]types.WriteRequest {
+
+	var chunks [][]types.WriteRequest
+	var end int
+
+	for i := 0; i < len(slice); i += size {
+
+		if end = i + size; end > len(slice) {
+			end = len(slice)
+		}
+
+		chunks = append(chunks, slice[i:end])
+	}
+
+	return chunks
 }
 
 func main() {
