@@ -37,7 +37,7 @@ func handle(ctx context.Context, in map[string]interface{}) (map[string]interfac
 	}
 
 	if _, ok := in["accounts"]; ok {
-		return accounts(ignore)
+		return accountsOnly(ignore)
 	}
 
 	if id, ok := in["campaigns"]; ok {
@@ -49,6 +49,15 @@ func handle(ctx context.Context, in map[string]interface{}) (map[string]interfac
 	}
 
 	return nil, errors.New("key not found")
+}
+
+func accountsOnly(ignore map[string]interface{}) (map[string]interface{}, error) {
+	if out, err := fb.Accounts(ignore).Marketing().GET(); err != nil {
+		log.WithError(err).Error()
+		return nil, err
+	} else {
+		return out, nil
+	}
 }
 
 func accounts(ignore map[string]interface{}) (map[string]interface{}, error) {

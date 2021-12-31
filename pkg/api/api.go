@@ -9,6 +9,7 @@ import (
 var headers = map[string]string{"Access-Control-Allow-Origin": "*"} // Required when CORS enabled in API Gateway.
 
 func Err(err error) (events.APIGatewayV2HTTPResponse, error) {
+	log.WithError(err).Error()
 	return worker(http.StatusBadRequest, err.Error())
 }
 

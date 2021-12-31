@@ -9,8 +9,8 @@ func Init() {
 	log.SetOutput(os.Stdout)
 	log.SetLevel(log.TraceLevel)
 	log.SetFormatter(&log.TextFormatter{
-		DisableColors: false,
-		FullTimestamp: true,
-		ForceColors:   true,
+		DisableColors: true,
+		FullTimestamp: false,
+		ForceColors:   false,
 	})
 }

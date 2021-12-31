@@ -393,13 +393,13 @@ func NewCampaignPayload(data []CampaignData) CampaignPayload {
 
 	if p.SessionsF = zeroUSD; m["sessions"] != nil {
 		if p.Sessions = m["sessions"].(float64); p.Sessions > 0 {
-			p.SessionsF = usd.FormatMoney(p.Sessions)
+			p.SessionsF = num.FormatMoney(p.Sessions)
 		}
 	}
 
 	if p.PageViewsF = zeroUSD; m["page_views"] != nil {
 		if p.PageViews = m["page_views"].(float64); p.PageViews > 0 {
-			p.PageViewsF = usd.FormatMoney(p.PageViews)
+			p.PageViewsF = num.FormatMoney(p.PageViews)
 		}
 	}
 
