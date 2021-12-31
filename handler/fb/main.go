@@ -1,18 +1,22 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/config"
+	faas "github.com/aws/aws-sdk-go-v2/service/lambda"
+	"github.com/aws/aws-sdk-go-v2/service/lambda/types"
+	"github.com/aws/smithy-go/ptr"
 	log "github.com/sirupsen/logrus"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"plumbus/pkg/api"
 	"plumbus/pkg/repo"
-	"plumbus/pkg/svc"
 	"plumbus/pkg/util"
 	"plumbus/pkg/util/logs"
 	"strings"
@@ -66,8 +70,17 @@ type Campaign struct {
 	Revenue      float64 `json:"revenue"`
 }
 
+var (
+	sam *faas.Client
+)
+
 func init() {
 	logs.Init()
+	if cfg, err := config.LoadDefaultConfig(context.TODO()); err != nil {
+		log.WithError(err).Fatal()
+	} else {
+		sam = faas.NewFromConfig(cfg)
+	}
 }
 
 func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
@@ -92,32 +105,35 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 }
 
 func accounts() (events.APIGatewayV2HTTPResponse, error) {
-
-	var err error
-
-	var bytes []byte
-	if bytes, err = svc.Accounts(); err != nil {
-		return api.Err(err)
+	b, _ := json.Marshal(map[string]interface{}{"accounts": true})
+	input := &faas.InvokeInput{
+		FunctionName:   ptr.String("plumbus_accountHandler"),
+		InvocationType: types.InvocationTypeRequestResponse,
+		LogType:        types.LogTypeTail,
+		Payload:        b,
 	}
-
-	return api.OK(string(bytes))
+	if output, err := sam.Invoke(context.TODO(), input); err != nil {
+		log.WithError(err).Error()
+		return api.Err(err)
+	} else {
+		return api.OK(string(output.Payload))
+	}
 }
 
 func campaigns(id string) (events.APIGatewayV2HTTPResponse, error) {
-
-	var err error
-
-	var out []interface{}
-	if out, err = svc.Campaigns(id); err != nil {
-		return api.Err(err)
+	b, _ := json.Marshal(map[string]interface{}{"campaigns": id})
+	input := &faas.InvokeInput{
+		FunctionName:   ptr.String("plumbus_accountHandler"),
+		InvocationType: types.InvocationTypeRequestResponse,
+		LogType:        types.LogTypeTail,
+		Payload:        b,
 	}
-
-	var bytes []byte
-	if bytes, err = json.Marshal(&out); err != nil {
+	if output, err := sam.Invoke(context.TODO(), input); err != nil {
+		log.WithError(err).Error()
 		return api.Err(err)
+	} else {
+		return api.OK(string(output.Payload))
 	}
-
-	return api.OK(string(bytes))
 }
 
 func getCampaignsStatus(campaignID string) string {

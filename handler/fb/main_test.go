@@ -22,18 +22,18 @@ func TestHandleActs(t *testing.T) {
 
 }
 
-//func TestHandleCamps(t *testing.T) {
-//	res, _ := handle(events.APIGatewayV2HTTPRequest{
-//		QueryStringParameters: map[string]string{
-//			"domain": "camps",
-//			"id":     "564715394630862",
-//		},
-//	})
-//	if res.StatusCode != http.StatusOK {
-//		t.Fail()
-//	}
-//}
-//
+func TestHandleCamps(t *testing.T) {
+	res, _ := handle(events.APIGatewayV2HTTPRequest{
+		QueryStringParameters: map[string]string{
+			"domain": "camps",
+			"id":     "564715394630862",
+		},
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fail()
+	}
+}
+
 //func TestHandleSets(t *testing.T) {
 //	res, _ := handle(events.APIGatewayV2HTTPRequest{QueryStringParameters: map[string]string{"domain": "sets"}})
 //	if res.StatusCode != http.StatusOK {

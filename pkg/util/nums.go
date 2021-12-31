@@ -15,8 +15,8 @@ func IsNumber(s string) bool {
 func StringToFloat64(s string) float64 {
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		log.WithFields(log.Fields{"err": err}).Error()
-		return -400
+		log.WithError(err)
+		return 0
 	}
 	return f
 }

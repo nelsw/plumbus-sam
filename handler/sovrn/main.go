@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	log "github.com/sirupsen/logrus"
 	"plumbus/pkg/api"
 	"plumbus/pkg/repo"
+	"plumbus/pkg/util"
 	"plumbus/pkg/util/logs"
+	"strconv"
 	"strings"
 )
 
@@ -35,11 +37,25 @@ type Impressions struct {
 }
 
 func (i *Impressions) toPutItemInput() *dynamodb.PutItemInput {
-	if item, err := attributevalue.MarshalMap(i); err != nil {
-		log.WithError(err).Error()
-		return nil
-	} else {
-		return &dynamodb.PutItemInput{TableName: &table, Item: item}
+	//if item, err := attributevalue.MarshalMap(i); err != nil {
+	//	return nil
+	//} else {
+	//	return &dynamodb.PutItemInput{TableName: &table, Item: item}
+	//}
+
+	return &dynamodb.PutItemInput{
+		TableName: &table,
+		Item: map[string]types.AttributeValue{
+			"impressions.utm_campaign":         &types.AttributeValueMemberS{Value: i.Campaign},
+			"impressions.utm_adset":            &types.AttributeValueMemberS{Value: i.AdSet},
+			"impressions.subid":                &types.AttributeValueMemberS{Value: i.SubID},
+			"impressions.estimated_revenue":    &types.AttributeValueMemberN{Value: util.FloatToDecimal(i.Revenue)},
+			"impressions.total_ad_impressions": &types.AttributeValueMemberN{Value: strconv.Itoa(i.Impressions)},
+			"impressions.sessions_rpm":         &types.AttributeValueMemberN{Value: util.FloatToDecimal(i.SessionsRPM)},
+			"impressions.click_through_rate":   &types.AttributeValueMemberS{Value: util.FloatToDecimal(i.CTR)},
+			"impressions.page_rpm":             &types.AttributeValueMemberS{Value: util.FloatToDecimal(i.PageRPM)},
+			"sovrn_account":                    &types.AttributeValueMemberS{Value: i.Account},
+		},
 	}
 }
 
@@ -65,6 +81,9 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 		return api.OK("")
 	}
 
+	fmt.Println("impressions", impressions)
+	util.PrettyPrint(impressions)
+
 	var out interface{}
 	if err = repo.ScanInputAndUnmarshal(&dynamodb.ScanInput{TableName: &table}, &out); err != nil {
 		log.WithError(err).Error()
@@ -73,15 +92,17 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 
 	fmt.Println(out)
 
-	for _, o := range out.([]interface{}) {
-		if m, ok := o.(map[string]interface{}); !ok {
-			fmt.Println("want type map[string]interface{};  got ", o)
-		} else {
-			acct := fmt.Sprintf("%v", m["account"])
-			if acct == "" || acct == impressions[0].Account {
-				key := fmt.Sprintf("%v", m["campaign"])
-				if err = repo.DelByEntry(table, "campaign", key); err != nil {
-					log.WithError(err).Error("while deleting", key)
+	if len(out.([]interface{})) > 0 {
+		for _, o := range out.([]interface{}) {
+			if m, ok := o.(map[string]interface{}); !ok {
+				fmt.Println("want type map[string]interface{};  got ", o)
+			} else {
+				acct := fmt.Sprintf("%v", m["account"])
+				if acct == "" || acct == impressions[0].Account {
+					key := fmt.Sprintf("%v", m["campaign"])
+					if err = repo.DelByEntry(table, "campaign", key); err != nil {
+						log.WithError(err).Error("while deleting", key)
+					}
 				}
 			}
 		}

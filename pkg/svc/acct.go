@@ -23,19 +23,6 @@ func init() {
 	logs.Init()
 }
 
-func Accounts() ([]byte, error) {
-
-	in := input
-	in.Payload = []byte(`{"accounts":true}`)
-	if output, err := sam.Invoke(context.TODO(), in); err != nil {
-		log.WithError(err).Error()
-		return nil, err
-	} else {
-		fmt.Println(string(output.Payload))
-		return output.Payload, nil
-	}
-}
-
 func AdAccountsToIgnoreMap() (out map[string]interface{}, err error) {
 
 	var invokeOutput *faas.InvokeOutput

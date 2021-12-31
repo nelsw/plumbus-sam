@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	log "github.com/sirupsen/logrus"
 	"plumbus/pkg/util/logs"
+	"time"
 )
 
 var (
@@ -28,13 +29,50 @@ func init() {
 }
 
 func Get(table, key, val string) ([]byte, error) {
+	return get(table, key, val, 1)
+}
 
+func get(table, key, val string, attempt int64) ([]byte, error) {
 	var err error
 
 	var output *dynamodb.GetItemOutput
 	var input = &dynamodb.GetItemInput{
 		TableName: &table,
 		Key:       map[string]types.AttributeValue{key: &types.AttributeValueMemberS{Value: val}},
+	}
+
+	if output, err = db.GetItem(ctx, input); err != nil {
+		if attempt > 5 {
+			log.WithError(err).Error()
+			return nil, err
+		}
+		log.Trace(err)
+		time.Sleep(time.Duration(1000 * 2 * attempt))
+		return get(table, key, val, attempt+1)
+	}
+
+	var payload map[string]interface{}
+	if err = attributevalue.UnmarshalMap(output.Item, &payload); err != nil {
+		log.WithError(err).Error()
+		return nil, err
+	}
+
+	var bytes []byte
+	if bytes, err = json.Marshal(&payload); err != nil {
+		return nil, err
+	}
+
+	return bytes, nil
+}
+
+func GetByInt(table, key, val string) ([]byte, error) {
+
+	var err error
+
+	var output *dynamodb.GetItemOutput
+	var input = &dynamodb.GetItemInput{
+		TableName: &table,
+		Key:       map[string]types.AttributeValue{key: &types.AttributeValueMemberN{Value: val}},
 	}
 
 	if output, err = db.GetItem(ctx, input); err != nil {
