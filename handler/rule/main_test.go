@@ -1,1 +1,1 @@
-package rule
+package main

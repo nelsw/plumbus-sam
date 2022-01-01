@@ -23,6 +23,7 @@ func init() {
 
 func handle(ctx context.Context, in map[string]interface{}) (map[string]interface{}, error) {
 
+	log.Info(ctx)
 	log.Info(in)
 
 	ignore, err := accountsToIgnore()

@@ -31,6 +31,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.6.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.11.1 // indirect
 	github.com/cockroachdb/apd v1.1.0 // indirect
+	github.com/google/uuid v1.3.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/lestrrat-go/jwx v0.9.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
