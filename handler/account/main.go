@@ -37,6 +37,18 @@ func handle(ctx context.Context, in map[string]interface{}) (map[string]interfac
 		return ignore, nil
 	}
 
+	if _, ok := in["account_ids"]; ok {
+		return accountIDs(ignore)
+	}
+
+	if _, ok := in["campaign_campaign_spends"]; ok {
+		return accountCampaignSpends(ignore)
+	}
+
+	if _, ok := in["campaign_status_updates"]; ok {
+		return campaignStatusUpdates(ok)
+	}
+
 	if _, ok := in["accounts"]; ok {
 		return accountsOnly(ignore)
 	}
@@ -50,6 +62,38 @@ func handle(ctx context.Context, in map[string]interface{}) (map[string]interfac
 	}
 
 	return nil, errors.New("key not found")
+}
+
+func accountIDs(ignore map[string]interface{}) (map[string]interface{}, error) {
+	if out, err := fb.AccountIDs(ignore).GET(); err != nil {
+		log.WithError(err).Error()
+		return nil, err
+	} else {
+		return out, nil
+	}
+}
+
+func accountCampaignSpends(ignore map[string]interface{}) (map[string]interface{}, error) {
+	if out, err := fb.GetAdAccountCampaignSpends(ignore); err != nil {
+		log.WithError(err).Error()
+		return nil, err
+	} else {
+		return out, nil
+	}
+}
+
+func campaignSpends(in interface{}) (map[string]interface{}, error) {
+	if out, err := fb.CampaignSpends(in.(string)).GET(); err != nil {
+		log.WithError(err).Error()
+		return nil, err
+	} else {
+		return out, nil
+	}
+}
+
+func campaignStatusUpdates(in interface{}) (map[string]interface{}, error) {
+	fb.CampaignStatuses(in.(map[string]interface{})).POST()
+	return nil, nil
 }
 
 func accountsOnly(ignore map[string]interface{}) (map[string]interface{}, error) {

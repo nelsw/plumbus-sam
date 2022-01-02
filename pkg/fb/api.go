@@ -33,6 +33,7 @@ var usd = accounting.Accounting{Symbol: "$", Precision: 2}
 var dec = accounting.Accounting{Symbol: "", Precision: 2}
 var num = accounting.Accounting{}
 var pct = accounting.Accounting{Symbol: "%", Precision: 2, Format: "%v%s"}
+var api = "https://graph.facebook.com/v12.0"
 
 var (
 	accountMarketingFields = []string{
@@ -133,7 +134,10 @@ var (
 
 type API struct {
 	account,
+	accountIDs,
 	campaign,
+	campaignSpends,
+	campaignStatuses,
 	adSets,
 	ads,
 	marketing,
@@ -148,6 +152,8 @@ type API struct {
 	adSetID,
 	adID,
 	url string
+
+	campaignStatusMap map[string]interface{}
 
 	fields []string
 
@@ -191,6 +197,13 @@ func Account(id string) *API {
 	return a
 }
 
+func AccountIDs(ignore map[string]interface{}) *API {
+	a := newAPI()
+	a.accountIDs = true
+	a.ignore = ignore
+	return a
+}
+
 func Campaign(id string) *API {
 	a := newAPI()
 	a.campaignID = id
@@ -202,6 +215,21 @@ func Campaigns(id string) *API {
 	a := newAPI()
 	a.accountID = id
 	a.campaign = true
+	return a
+}
+
+func CampaignSpends(id string) *API {
+	a := newAPI()
+	a.accountID = id
+	a.campaign = true
+	a.campaignSpends = true
+	return a
+}
+
+func CampaignStatuses(campaignStatusMap map[string]interface{}) *API {
+	a := newAPI()
+	a.campaignStatuses = true
+	a.campaignStatusMap = campaignStatusMap
 	return a
 }
 
@@ -534,9 +562,82 @@ func (a ByDatetime) Len() int           { return len(a) }
 func (a ByDatetime) Less(i, j int) bool { return a[i].Datetime.Before(a[j].Datetime) }
 func (a ByDatetime) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
+func (a *API) POST() {
+
+	var client = &http.Client{Timeout: 25 * time.Second}
+	var req *http.Request
+	var err error
+
+	for id, status := range a.campaignStatusMap {
+
+		if req, err = http.NewRequest(http.MethodPost, api+"/"+id, nil); err != nil {
+			log.WithError(err)
+		}
+
+		q := req.URL.Query()
+		q.Add("access_token", os.Getenv("tkn"))
+		q.Add("status", status.(string))
+		req.URL.RawQuery = q.Encode()
+
+		if _, err = client.Do(req); err != nil {
+			log.WithError(err)
+		}
+	}
+}
+
 func (a *API) GET() (map[string]interface{}, error) {
 
 	a.setURL()
+
+	if a.accountIDs {
+
+	}
+
+	if a.campaignSpends {
+
+		a.setToken().
+			setInsightLevel().
+			setBreakdowns().
+			Fields([]string{"campaign_id", "spend"}).
+			setTimeRanges()
+
+		out, err := get(a.url)
+		if err != nil {
+			log.WithError(err)
+			return nil, err
+		}
+
+		got := map[string]interface{}{}
+
+		var wg1 sync.WaitGroup
+		for _, o := range out {
+
+			wg1.Add(1)
+
+			go func(o interface{}) {
+
+				defer wg1.Done()
+
+				m := o.(map[string]interface{})
+				id := m["campaign_id"].(string)
+				var spend float64
+				if spend, err = strconv.ParseFloat(m["spend"].(string), 64); err != nil {
+					log.Trace("error parsing spend for " + id + " spend was " + m["spend"].(string))
+					return
+				}
+
+				if v, ok := got[id]; ok {
+					got[id] = v.(float64) + spend
+				} else {
+					got[id] = spend
+				}
+
+			}(o)
+
+		}
+		wg1.Wait()
+		return got, nil
+	}
 
 	if a.insights {
 
@@ -741,7 +842,7 @@ func (a *API) GET() (map[string]interface{}, error) {
 }
 
 func (a *API) setURL() *API {
-	a.url = "https://graph.facebook.com/v12.0"
+	a.url = api
 	return a
 }
 
@@ -755,8 +856,9 @@ func (a *API) setInsights() *API {
 	return a
 }
 
-func (a *API) setAdAccounts() {
+func (a *API) setAdAccounts() *API {
 	a.url += "/adaccounts"
+	return a
 }
 
 func (a *API) setAdAccount() *API {
@@ -814,6 +916,120 @@ func (a *API) setFields() *API {
 		a.url += "&fields=" + strings.Join(a.fields, ",")
 	}
 	return a
+}
+
+func GetAdAccountCampaignSpends(ignore map[string]interface{}) (map[string]interface{}, error) {
+
+	url1 := api + "/10158615602243295/adaccounts?access_token=" + os.Getenv("tkn")
+
+	var err error
+
+	var out []interface{}
+	if out, err = get(url1); err != nil {
+		log.WithError(err).Error()
+		return nil, err
+	}
+
+	got := map[string]interface{}{}
+
+	var wg sync.WaitGroup
+
+	for _, o := range out {
+		wg.Add(1)
+		m := o.(map[string]interface{})
+		go func(accountID string) {
+
+			defer wg.Done()
+
+			if _, ok := ignore[accountID]; ok {
+				return
+			}
+
+			spends := map[string]interface{}{}
+			if spends, err = getCampaignSpends(accountID); err != nil {
+				log.Trace(err)
+				return
+			}
+
+			mutex.Lock()
+			got[accountID] = spends
+			mutex.Unlock()
+
+		}(m["account_id"].(string))
+	}
+
+	wg.Wait()
+
+	return got, nil
+}
+
+func getCampaignSpends(accountID string) (map[string]interface{}, error) {
+
+	url := api + "/act_" + accountID + "/insights?access_token=" + os.Getenv("tkn")
+
+	url += "&level=campaign"
+	url += "&breakdowns=hourly_stats_aggregated_by_advertiser_time_zone"
+	url += "&fields=campaign_id,spend"
+
+	n := time.Now().Local()
+	yesterday := n.Add(time.Hour * 24 * -1).Format(dateLayout)
+	today := n.Format(dateLayout)
+	tomorrow := n.Add(time.Hour * 24).Format(dateLayout)
+	b1 := "{since:'" + yesterday + "',until:'" + today + "'}"
+	b2 := "{since:'" + today + "',until:'" + tomorrow + "'}"
+	url += "&time_ranges=[" + strings.Join([]string{b1, b2}, ",") + "]"
+
+	var err error
+
+	var out []interface{}
+	if out, err = get(url); err != nil {
+		log.WithError(err).Error()
+		return nil, err
+	}
+
+	got := map[string]interface{}{}
+
+	for _, o := range out {
+		m := o.(map[string]interface{})
+		id := m["campaign_id"].(string)
+		var spend float64
+		if spend, err = strconv.ParseFloat(m["spend"].(string), 64); err != nil {
+			log.Trace("error parsing spend for " + id + " spend was " + m["spend"].(string))
+			return nil, err
+		}
+
+		if v, ok := got[id]; ok {
+			got[id] = v.(float64) + spend
+		} else {
+			got[id] = spend
+		}
+	}
+
+	return got, nil
+}
+
+func (a *API) getAdAccountIDs() (map[string]interface{}, error) {
+
+	a.setURL().setUserID().setAdAccounts().setToken()
+
+	var err error
+
+	var out []interface{}
+	if out, err = get(a.url); err != nil {
+		log.WithError(err).Error()
+		return nil, err
+	}
+
+	res := map[string]interface{}{}
+	for _, w := range out {
+		z := w.(map[string]interface{})
+		accountID := fmt.Sprintf("%v", z["account_id"])
+		if _, ok := a.ignore[accountID]; !ok {
+			res[accountID] = z
+		}
+
+	}
+	return res, nil
 }
 
 func (a *API) getAdAccounts() (map[string]interface{}, error) {

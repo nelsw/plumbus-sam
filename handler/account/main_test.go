@@ -11,6 +11,12 @@ func TestHandle(t *testing.T) {
 
 	ctx := context.TODO()
 
+	if out, err := handle(ctx, map[string]interface{}{"campaign_campaign_spends": true}); err != nil {
+		t.Error(err)
+	} else {
+		util.PrettyPrint(out)
+	}
+
 	if out, err := handle(ctx, map[string]interface{}{"ignore": true}); err != nil || len(out) == 0 {
 		t.Fail()
 	} else {
