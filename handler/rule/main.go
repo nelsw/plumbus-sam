@@ -26,14 +26,14 @@ type Rule struct {
 	Scope      string      `json:"scope"` // global for now
 	Conditions []Condition `json:"conditions"`
 	Action     string      `json:"action"` // enable / disable
-	Status     string      `json:"status"`
+	Status     bool        `json:"status"` // on / off
 	Created    time.Time   `json:"created"`
 	Updated    time.Time   `json:"updated"`
 }
 
 type Condition struct {
 	Key      string  `json:"key"`      // roi % / spend
-	Operator string  `json:"operator"` // ge, le
+	Operator string  `json:"operator"` // gt, lt
 	Value    float64 `json:"value"`
 }
 
@@ -85,6 +85,16 @@ func handle(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events
 
 		bytes, _ := json.Marshal(&rule)
 		return api.OK(string(bytes))
+	}
+
+	if method == http.MethodDelete {
+
+		id := request.QueryStringParameters["ID"]
+		if err := repo.DelByEntry(table, "ID", id); err != nil {
+			return api.Err(err)
+		}
+
+		return api.OK("")
 	}
 
 	return api.Err(errors.New("nothing handled"))
