@@ -176,3 +176,7 @@ func Put(input *dynamodb.PutItemInput) error {
 func BatchWriteItem(ctx context.Context, in *dynamodb.BatchWriteItemInput) (*dynamodb.BatchWriteItemOutput, error) {
 	return db.BatchWriteItem(ctx, in)
 }
+
+func BatchGetItem(ctx context.Context, in *dynamodb.BatchGetItemInput) (*dynamodb.BatchGetItemOutput, error) {
+	return db.BatchGetItem(ctx, in)
+}
