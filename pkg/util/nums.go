@@ -15,7 +15,7 @@ func IsNumber(s string) bool {
 func StringToFloat64(s string) float64 {
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		log.WithError(err)
+		log.WithError(err).Error()
 		return 0
 	}
 	return f

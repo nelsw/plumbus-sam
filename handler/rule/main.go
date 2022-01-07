@@ -23,18 +23,35 @@ var table = "plumbus_fb_rule"
 type Rule struct {
 	ID         string      `json:"id"`
 	Name       string      `json:"name"`
-	Scope      string      `json:"scope"` // global for now
-	Conditions []Condition `json:"conditions"`
-	Action     string      `json:"action"` // enable / disable
 	Status     bool        `json:"status"` // on / off
+	Scope      []string    `json:"scope"`  // account id's
+	Conditions []Condition `json:"conditions"`
+	Action     bool        `json:"action"` // enable / disable
 	Created    time.Time   `json:"created"`
 	Updated    time.Time   `json:"updated"`
 }
 
+type Target string
+
+const (
+	targetROI   = "ROI"
+	targetSpend = "SPEND"
+)
+
+type Operator string
+
+const (
+	operatorGT = ">"
+	operatorLT = "<"
+)
+
 type Condition struct {
-	Key      string  `json:"key"`      // roi % / spend
-	Operator string  `json:"operator"` // gt, lt
-	Value    float64 `json:"value"`
+	ID       string    `json:"id"`
+	Target   Target    `json:"target"`   // roi % / $ spend
+	Operator Operator  `json:"operator"` // gt, lt
+	Value    float64   `json:"value"`    // roi % / $ spend
+	Created  time.Time `json:"created"`
+	Updated  time.Time `json:"updated"`
 }
 
 func init() {
@@ -47,6 +64,10 @@ func handle(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events
 
 	method := request.RequestContext.HTTP.Method
 
+	if method == http.MethodOptions {
+		return api.OK("")
+	}
+
 	if method == http.MethodGet {
 
 		var out interface{}
@@ -54,7 +75,14 @@ func handle(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events
 			return api.Err(err)
 		}
 
+		var rules []Rule
+
 		bytes, _ := json.Marshal(out)
+		if err := json.Unmarshal(bytes, &rules); err != nil {
+			return api.Err(err)
+		}
+
+		bytes, _ = json.Marshal(rules)
 		return api.OK(string(bytes))
 	}
 
@@ -67,12 +95,20 @@ func handle(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events
 			return api.Err(err)
 		}
 
+		now := time.Now().UTC()
+		rule.Updated = now
 		if rule.ID == "" {
 			rule.ID = uuid.NewString()
-			rule.Created = time.Now().UTC()
+			rule.Created = now
 		}
 
-		rule.Updated = time.Now().UTC()
+		for index, condition := range rule.Conditions {
+			rule.Conditions[index].Updated = now
+			if condition.ID == "" {
+				rule.Conditions[index].ID = uuid.NewString()
+				rule.Conditions[index].Created = now
+			}
+		}
 
 		var item map[string]types.AttributeValue
 		if item, err = attributevalue.MarshalMap(&rule); err != nil {
@@ -89,7 +125,7 @@ func handle(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events
 
 	if method == http.MethodDelete {
 
-		id := request.QueryStringParameters["ID"]
+		id := request.QueryStringParameters["id"]
 		if err := repo.DelByEntry(table, "ID", id); err != nil {
 			return api.Err(err)
 		}

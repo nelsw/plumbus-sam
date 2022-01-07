@@ -17,8 +17,24 @@ func OK(body string) (events.APIGatewayV2HTTPResponse, error) {
 	return worker(http.StatusOK, body)
 }
 
+func OnlyOK(body string) (events.APIGatewayV2HTTPResponse, error) {
+	return abbreviatedWorker(http.StatusOK, body)
+}
+
 func worker(code int, body string) (events.APIGatewayV2HTTPResponse, error) {
 	r := events.APIGatewayV2HTTPResponse{Headers: headers, StatusCode: code, Body: body}
-	log.WithFields(log.Fields{"res": r}).Info()
+	log.WithFields(log.Fields{
+		"code": r.StatusCode,
+		"body": body,
+	}).Info()
+	return r, nil
+}
+
+func abbreviatedWorker(code int, body string) (events.APIGatewayV2HTTPResponse, error) {
+	r := events.APIGatewayV2HTTPResponse{Headers: headers, StatusCode: code, Body: body}
+	log.WithFields(log.Fields{
+		"code":       r.StatusCode,
+		"body (len)": len(body),
+	}).Info()
 	return r, nil
 }

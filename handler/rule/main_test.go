@@ -38,12 +38,12 @@ func testPut() bool {
 		Name: "test rule",
 		Conditions: []Condition{
 			{
-				Key:      "spend",
-				Operator: "gt",
+				Target:   targetSpend,
+				Operator: operatorGT,
 				Value:    100,
 			},
 		},
-		Action: "enable",
+		Action: true,
 		Status: true,
 	})
 
@@ -83,7 +83,7 @@ func testGet() []Rule {
 func testDel(id string) string {
 
 	req := events.APIGatewayV2HTTPRequest{
-		QueryStringParameters: map[string]string{"ID": id},
+		QueryStringParameters: map[string]string{"id": id},
 		RequestContext: events.APIGatewayV2HTTPRequestContext{
 			HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{
 				Method: http.MethodDelete,

@@ -37,6 +37,10 @@ func handle(ctx context.Context, in map[string]interface{}) (map[string]interfac
 		return ignore, nil
 	}
 
+	if _, ok := in["tree"]; ok {
+		return ignore, nil
+	}
+
 	if _, ok := in["account_ids"]; ok {
 		return accountIDs(ignore)
 	}
@@ -62,6 +66,15 @@ func handle(ctx context.Context, in map[string]interface{}) (map[string]interfac
 	}
 
 	return nil, errors.New("key not found")
+}
+
+func accountTree(ignore map[string]interface{}) (map[string]interface{}, error) {
+	if out, err := fb.AccountIDs(ignore).GET(); err != nil {
+		log.WithError(err).Error()
+		return nil, err
+	} else {
+		return out, nil
+	}
 }
 
 func accountIDs(ignore map[string]interface{}) (map[string]interface{}, error) {
@@ -127,7 +140,7 @@ func accounts(ignore map[string]interface{}) (map[string]interface{}, error) {
 				defer wg.Done()
 				var res map[string]interface{}
 				if res, err = campaigns(k); err != nil {
-					log.WithError(err)
+					log.WithError(err).Error()
 				} else {
 					spend := util.StringToFloat64(fmt.Sprintf("%v", res["account_spend"]))
 					revenue := util.StringToFloat64(fmt.Sprintf("%v", res["account_revenue"]))

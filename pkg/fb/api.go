@@ -571,7 +571,7 @@ func (a *API) POST() {
 	for id, status := range a.campaignStatusMap {
 
 		if req, err = http.NewRequest(http.MethodPost, api+"/"+id, nil); err != nil {
-			log.WithError(err)
+			log.WithError(err).Error()
 		}
 
 		q := req.URL.Query()
@@ -580,7 +580,7 @@ func (a *API) POST() {
 		req.URL.RawQuery = q.Encode()
 
 		if _, err = client.Do(req); err != nil {
-			log.WithError(err)
+			log.WithError(err).Error()
 		}
 	}
 }
@@ -603,7 +603,7 @@ func (a *API) GET() (map[string]interface{}, error) {
 
 		out, err := get(a.url)
 		if err != nil {
-			log.WithError(err)
+			log.WithError(err).Error()
 			return nil, err
 		}
 
@@ -658,7 +658,7 @@ func (a *API) GET() (map[string]interface{}, error) {
 
 		out, err := get(a.url)
 		if err != nil {
-			log.WithError(err)
+			log.WithError(err).Error()
 			return nil, err
 		}
 
@@ -847,8 +847,12 @@ func (a *API) setURL() *API {
 }
 
 func (a *API) setUserID() *API {
-	a.url += "/10158615602243295"
+	a.url += "/" + getUserID()
 	return a
+}
+
+func getUserID() string {
+	return "10158615602243295"
 }
 
 func (a *API) setInsights() *API {
@@ -878,6 +882,14 @@ func (a *API) setCampaigns() {
 func (a *API) setToken() *API {
 	a.url += "?access_token=" + os.Getenv("tkn")
 	return a
+}
+
+func getToken() string {
+	return os.Getenv("tkn")
+}
+
+func getTokenPart() string {
+	return "access_token=" + getToken()
 }
 
 func (a *API) setBreakdowns() *API {
@@ -916,6 +928,10 @@ func (a *API) setFields() *API {
 		a.url += "&fields=" + strings.Join(a.fields, ",")
 	}
 	return a
+}
+
+func getAdAccounts() string {
+	return "adaccounts"
 }
 
 func GetAdAccountCampaignSpends(ignore map[string]interface{}) (map[string]interface{}, error) {
