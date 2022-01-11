@@ -192,6 +192,8 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 				return api.Err(err)
 			}
 
+			// todo - run rules
+
 			return api.OK("")
 		}
 
