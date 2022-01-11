@@ -385,26 +385,28 @@ func addRevenue(ctx context.Context, cc []campaign, ii []Insight) {
 		iii[i.CampaignID] = i
 	}
 
+	qqq := map[string]campaign{}
 	sss := map[string]sovrn.Entity{}
 	var keys []map[string]types.AttributeValue
-	queued := map[string]campaign{}
 	for idx, c := range cc {
 
-		if _, ok := queued[c.utm()]; !ok {
-			queued[c.utm()] = c
-			keys = append(keys, map[string]types.AttributeValue{"UTM": &types.AttributeValueMemberS{Value: c.utm()}})
-			if len(keys)%25 == 0 || idx == len(cc) {
-				if got, err := batchGet(ctx, keys); err != nil {
-					log.WithError(err).Error()
-				} else {
-					for _, g := range got {
-						sss[g.UTM] = g
-					}
-				}
-				keys = []map[string]types.AttributeValue{}
-			}
+		if _, ok := qqq[c.utm()]; ok {
+			continue
 		}
 
+		keys = append(keys, map[string]types.AttributeValue{"UTM": &types.AttributeValueMemberS{Value: c.utm()}})
+		qqq[c.utm()] = c
+
+		if len(keys)%25 == 0 || idx == len(cc) {
+			if ss, err := batchGet(ctx, keys); err != nil {
+				log.WithError(err).Error()
+			} else {
+				for _, s := range ss {
+					sss[s.UTM] = s
+				}
+			}
+			keys = []map[string]types.AttributeValue{}
+		}
 	}
 
 	var wg sync.WaitGroup
