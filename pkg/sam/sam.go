@@ -1,4 +1,4 @@
-package svc
+package sam
 
 import (
 	"context"
@@ -8,15 +8,21 @@ import (
 	"plumbus/pkg/util/logs"
 )
 
-var (
-	sam *faas.Client
-)
+var sam *faas.Client
 
 func init() {
 	logs.Init()
-	if cfg, err := config.LoadDefaultConfig(context.TODO()); err != nil {
+	if cfg, err := config.LoadDefaultConfig(context.Background()); err != nil {
 		log.WithError(err).Fatal()
 	} else {
 		sam = faas.NewFromConfig(cfg)
 	}
+}
+
+func NewEvent(ctx context.Context, name string) {
+
+}
+
+func NewRequest(ctx context.Context, name string) {
+
 }

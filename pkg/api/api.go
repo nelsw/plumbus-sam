@@ -8,6 +8,10 @@ import (
 
 var headers = map[string]string{"Access-Control-Allow-Origin": "*"} // Required when CORS enabled in API Gateway.
 
+func Empty() (events.APIGatewayV2HTTPResponse, error) {
+	return worker(http.StatusNotFound, "")
+}
+
 func Err(err error) (events.APIGatewayV2HTTPResponse, error) {
 	log.WithError(err).Error()
 	return worker(http.StatusBadRequest, err.Error())
@@ -22,19 +26,11 @@ func OnlyOK(body string) (events.APIGatewayV2HTTPResponse, error) {
 }
 
 func worker(code int, body string) (events.APIGatewayV2HTTPResponse, error) {
-	r := events.APIGatewayV2HTTPResponse{Headers: headers, StatusCode: code, Body: body}
-	log.WithFields(log.Fields{
-		"code": r.StatusCode,
-		"body": body,
-	}).Info()
-	return r, nil
+	log.WithFields(log.Fields{"code": code, "body": body}).Info()
+	return events.APIGatewayV2HTTPResponse{Headers: headers, StatusCode: code, Body: body}, nil
 }
 
 func abbreviatedWorker(code int, body string) (events.APIGatewayV2HTTPResponse, error) {
-	r := events.APIGatewayV2HTTPResponse{Headers: headers, StatusCode: code, Body: body}
-	log.WithFields(log.Fields{
-		"code":       r.StatusCode,
-		"body (len)": len(body),
-	}).Info()
-	return r, nil
+	log.WithFields(log.Fields{"code": code, "body (len)": len(body)}).Info()
+	return events.APIGatewayV2HTTPResponse{Headers: headers, StatusCode: code, Body: body}, nil
 }

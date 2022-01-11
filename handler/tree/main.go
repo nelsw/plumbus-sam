@@ -13,7 +13,7 @@ import (
 	"os"
 	"plumbus/pkg/api"
 	"plumbus/pkg/repo"
-	"plumbus/pkg/util"
+	"strconv"
 	"sync"
 )
 
@@ -38,13 +38,33 @@ type Account struct {
 }
 
 type Campaign struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Status          string `json:"status"`
-	DailyBudget     string `json:"daily_budget,omitempty"`
-	RemainingBudget string `json:"remaining_budget,omitempty"`
-	Created         string `json:"created_time"`
-	Updated         string `json:"updated_time"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	Status          string  `json:"status"`
+	DailyBudget     string  `json:"daily_budget,omitempty"`
+	RemainingBudget string  `json:"remaining_budget,omitempty"`
+	Created         string  `json:"created_time"`
+	Updated         string  `json:"updated_time"`
+	Clicks          int     `json:"clicks"`
+	Impressions     int     `json:"impressions"`
+	Spend           float64 `json:"spend"`
+}
+
+func (c Campaign) insightsURL() string {
+	fields := "&fields=campaign_id,clicks,impressions,spend,cpc,cpp,cpm,ctr"
+	dates := "&date_preset=today"
+	return v12 + "/" + c.ID + "/insights" + token() + fields + dates
+}
+
+type Insight struct {
+	ID          string  `json:"campaign_id"`
+	Clicks      int     `json:"clicks"`
+	Impressions int     `json:"impressions"`
+	Spend       float64 `json:"spend"`
+	CPC         float64 `json:"cpc"` // The average cost for each click (all).
+	CPP         float64 `json:"cpp"` // The average cost to reach 1,000 people. This metric is estimated.
+	CPM         float64 `json:"cpm"` // The average cost for 1,000 impressions.
+	CTR         float64 `json:"ctr"` // The percentage of times people saw your ad and performed a click (all).
 }
 
 func handle(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
@@ -81,6 +101,10 @@ func getMarketData() (events.APIGatewayV2HTTPResponse, error) {
 	var accounts []Account
 	for _, a := range all {
 
+		if len(accounts) > 10 {
+			break
+		}
+
 		wg.Add(1)
 
 		go func(a interface{}) {
@@ -103,8 +127,6 @@ func getMarketData() (events.APIGatewayV2HTTPResponse, error) {
 				return
 			}
 
-			util.PrettyPrint(account)
-
 			var out []interface{}
 			if out, err = get(campaignsUrl(account.ID)); err != nil {
 				log.WithError(err).Error()
@@ -120,6 +142,32 @@ func getMarketData() (events.APIGatewayV2HTTPResponse, error) {
 			if err = json.Unmarshal(data, &campaigns); err != nil {
 				log.WithError(err).Error()
 				return
+			}
+
+			for i, c := range campaigns {
+
+				var cc []interface{}
+				if cc, err = get(c.insightsURL()); err != nil {
+					log.WithError(err).Error()
+					continue
+				}
+
+				if cc == nil {
+					continue
+				}
+
+				m := cc[0].(map[string]interface{})
+				clicksStr := m["clicks"].(string)
+				impressionsStr := m["impressions"].(string)
+				spendStr := m["spend"].(string)
+
+				clicks, _ := strconv.Atoi(clicksStr)
+				impressions, _ := strconv.Atoi(impressionsStr)
+				spend, _ := strconv.ParseFloat(spendStr, 64)
+
+				campaigns[i].Clicks = clicks
+				campaigns[i].Impressions = impressions
+				campaigns[i].Spend = spend
 			}
 
 			account.Campaigns = campaigns

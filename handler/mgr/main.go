@@ -17,7 +17,7 @@ import (
 	"os"
 	"plumbus/pkg/api"
 	"plumbus/pkg/repo"
-	"plumbus/pkg/svc"
+	"plumbus/pkg/sam"
 	"plumbus/pkg/util"
 	"plumbus/pkg/util/logs"
 	"regexp"
@@ -124,7 +124,7 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 	var err error
 
 	var accountsToIgnoreSlice []string
-	if accountsToIgnoreSlice, err = svc.AdAccountsToIgnoreSlice(); err != nil {
+	if accountsToIgnoreSlice, err = sam.AdAccountsToIgnoreSlice(); err != nil {
 		log.WithError(err).Error()
 		return api.Err(err)
 	}
@@ -165,7 +165,7 @@ func handle(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResp
 	var results []CampaignGuard
 
 	accountsToIgnoreMap := map[string]interface{}{}
-	if accountsToIgnoreMap, err = svc.AdAccountsToIgnoreMap(); err != nil {
+	if accountsToIgnoreMap, err = sam.AdAccountsToIgnoreMap(); err != nil {
 		log.WithError(err).Error()
 		return api.Err(err)
 	}

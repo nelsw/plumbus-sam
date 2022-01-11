@@ -28,6 +28,18 @@ func init() {
 	}
 }
 
+func GetIt(table, key, val string, it interface{}) (err error) {
+
+	var data []byte
+	if data, err = get(table, key, val, 1); err != nil {
+		log.WithError(err).Error()
+	} else if err = json.Unmarshal(data, &it); err != nil {
+		log.WithError(err).Error()
+	}
+
+	return
+}
+
 func Get(table, key, val string) ([]byte, error) {
 	return get(table, key, val, 1)
 }
@@ -49,35 +61,6 @@ func get(table, key, val string, attempt int64) ([]byte, error) {
 		log.Trace(err)
 		time.Sleep(time.Duration(1000 * 2 * attempt))
 		return get(table, key, val, attempt+1)
-	}
-
-	var payload map[string]interface{}
-	if err = attributevalue.UnmarshalMap(output.Item, &payload); err != nil {
-		log.WithError(err).Error()
-		return nil, err
-	}
-
-	var bytes []byte
-	if bytes, err = json.Marshal(&payload); err != nil {
-		return nil, err
-	}
-
-	return bytes, nil
-}
-
-func GetByInt(table, key, val string) ([]byte, error) {
-
-	var err error
-
-	var output *dynamodb.GetItemOutput
-	var input = &dynamodb.GetItemInput{
-		TableName: &table,
-		Key:       map[string]types.AttributeValue{key: &types.AttributeValueMemberN{Value: val}},
-	}
-
-	if output, err = db.GetItem(ctx, input); err != nil {
-		log.WithError(err).Error()
-		return nil, err
 	}
 
 	var payload map[string]interface{}
@@ -122,26 +105,12 @@ func DelByEntry(table, key, val string) error {
 	return DelByKey(table, map[string]types.AttributeValue{key: &types.AttributeValueMemberS{Value: val}})
 }
 
-func DelByKeys(table string, keys []map[string]types.AttributeValue) error {
-	for _, key := range keys {
-		if err := DelByKey(table, key); err != nil {
-			log.WithError(err).Error()
-			return err
-		}
-	}
-	return nil
-}
-
 func DelByKey(table string, key map[string]types.AttributeValue) error {
 	if _, err := db.DeleteItem(ctx, &dynamodb.DeleteItemInput{TableName: &table, Key: key}); err != nil {
 		log.WithError(err).Error()
 		return err
 	}
 	return nil
-}
-
-func ScanTable(table string) (*dynamodb.ScanOutput, error) {
-	return ScanInput(&dynamodb.ScanInput{TableName: &table})
 }
 
 func ScanInputAndUnmarshal(input *dynamodb.ScanInput, out *interface{}) error {
@@ -165,6 +134,22 @@ func ScanInput(input *dynamodb.ScanInput) (*dynamodb.ScanOutput, error) {
 	}
 }
 
+func Scan(in *dynamodb.ScanInput, v interface{}) (err error) {
+
+	var out *dynamodb.ScanOutput
+	if out, err = db.Scan(ctx, in); err != nil {
+		log.WithError(err).Error()
+		return
+	}
+
+	if err = attributevalue.UnmarshalListOfMaps(out.Items, &v); err != nil {
+		log.WithError(err).Error()
+		return err
+	}
+
+	return
+}
+
 func Put(input *dynamodb.PutItemInput) error {
 	if _, err := db.PutItem(ctx, input); err != nil {
 		log.WithError(err).Error()
@@ -177,6 +162,15 @@ func BatchWriteItem(ctx context.Context, in *dynamodb.BatchWriteItemInput) (*dyn
 	return db.BatchWriteItem(ctx, in)
 }
 
+func BatchWriteItems(ctx context.Context, table string, requests []types.WriteRequest) (*dynamodb.BatchWriteItemOutput, error) {
+	in := &dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{table: requests}}
+	return BatchWriteItem(ctx, in)
+}
+
 func BatchGetItem(ctx context.Context, in *dynamodb.BatchGetItemInput) (*dynamodb.BatchGetItemOutput, error) {
 	return db.BatchGetItem(ctx, in)
+}
+
+func Query(ctx context.Context, in *dynamodb.QueryInput) (*dynamodb.QueryOutput, error) {
+	return db.Query(ctx, in)
 }
