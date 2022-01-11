@@ -440,7 +440,7 @@ func addRevenue(ctx context.Context, cc []campaign, ii []Insight) {
 			c.Profit = c.Revenue - c.spend()
 
 			if c.Profit != 0 && c.spend() != 0 {
-				c.ROI = c.Profit / c.spend()
+				c.ROI = c.Profit / c.spend() * 100
 			} else if c.Profit != 0 {
 				c.ROI = c.Profit * 100
 			} else if c.spend() != 0 {
