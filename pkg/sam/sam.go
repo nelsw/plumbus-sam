@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/aws/aws-sdk-go-v2/config"
 	faas "github.com/aws/aws-sdk-go-v2/service/lambda"
+	"github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	log "github.com/sirupsen/logrus"
 	"plumbus/pkg/util/logs"
 )
@@ -19,10 +20,26 @@ func init() {
 	}
 }
 
-func NewEvent(ctx context.Context, name string) {
-
+func NewEvent(ctx context.Context, name string, data []byte) (out *faas.InvokeOutput, err error) {
+	return invoke(ctx, &faas.InvokeInput{
+		FunctionName:   &name,
+		InvocationType: types.InvocationTypeEvent,
+		Payload:        data,
+	})
 }
 
-func NewRequest(ctx context.Context, name string) {
+func NewRequest(ctx context.Context, name string, data []byte) (out *faas.InvokeOutput, err error) {
+	return invoke(ctx, &faas.InvokeInput{
+		FunctionName:   &name,
+		InvocationType: types.InvocationTypeRequestResponse,
+		LogType:        types.LogTypeTail,
+		Payload:        data,
+	})
+}
 
+func invoke(ctx context.Context, in *faas.InvokeInput) (out *faas.InvokeOutput, err error) {
+	if out, err = sam.Invoke(ctx, in); err != nil {
+		log.WithError(err).Error()
+	}
+	return
 }

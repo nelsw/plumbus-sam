@@ -31,7 +31,7 @@ func init() {
 func GetIt(table, key, val string, it interface{}) (err error) {
 
 	var data []byte
-	if data, err = get(table, key, val, 1); err != nil {
+	if data, err = get(table, key, val, 6); err != nil {
 		log.WithError(err).Error()
 	} else if err = json.Unmarshal(data, &it); err != nil {
 		log.WithError(err).Error()

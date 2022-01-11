@@ -11,6 +11,15 @@ var (
 	ctx = context.TODO()
 )
 
+func TestPutRoot(t *testing.T) {
+	req := newRequest(http.MethodPut, map[string]string{"node": "root"})
+
+	if res, _ := handle(ctx, req); res.StatusCode != http.StatusOK {
+		t.Error(res.StatusCode, res.Body)
+		return
+	}
+}
+
 func TestPutAccounts(t *testing.T) {
 
 	req := newRequest(http.MethodPut, map[string]string{"node": "account"})
@@ -21,9 +30,9 @@ func TestPutAccounts(t *testing.T) {
 	}
 }
 
-func TestGetAccounts(t *testing.T) {
+func TestPutCampaigns(t *testing.T) {
 
-	req := newRequest(http.MethodGet, map[string]string{"node": "account"})
+	req := newRequest(http.MethodPut, map[string]string{"node": "campaign"})
 
 	if res, _ := handle(ctx, req); res.StatusCode != http.StatusOK {
 		t.Error(res.StatusCode, res.Body)
@@ -31,9 +40,9 @@ func TestGetAccounts(t *testing.T) {
 	}
 }
 
-func TestPutCampaigns(t *testing.T) {
+func TestGetAccounts(t *testing.T) {
 
-	req := newRequest(http.MethodPut, map[string]string{"node": "campaign"})
+	req := newRequest(http.MethodGet, map[string]string{"node": "account"})
 
 	if res, _ := handle(ctx, req); res.StatusCode != http.StatusOK {
 		t.Error(res.StatusCode, res.Body)

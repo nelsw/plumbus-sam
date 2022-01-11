@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -13,22 +12,20 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/smithy-go/ptr"
 	log "github.com/sirupsen/logrus"
-	"io/ioutil"
 	"net/http"
-	"os"
 	"plumbus/pkg/api"
 	"plumbus/pkg/model/fb"
 	"plumbus/pkg/model/sovrn"
 	"plumbus/pkg/repo"
+	"plumbus/pkg/sam"
 	"plumbus/pkg/util"
 	"plumbus/pkg/util/logs"
+	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 const (
-	v12            = "https://graph.facebook.com/v12.0"
 	accountFields  = "&fields=account_id,name,account_status,created_time"
 	campaignFields = "&fields=account_id,id,name,status,daily_budget,budget_remaining,created_time,updated_time"
 )
@@ -36,7 +33,7 @@ const (
 var (
 	accountTable  = "plumbus_fb_account"
 	campaignTable = "plumbus_fb_campaign"
-	mutex         = sync.Mutex{}
+	mutex         = &sync.Mutex{}
 )
 
 type account struct {
@@ -63,14 +60,14 @@ func (a account) writeRequest() (out types.WriteRequest, err error) {
 }
 
 func (a account) campaignsURL() string {
-	return v12 + "/act_" + a.ID + "/campaigns" + token() + campaignFields
+	return fb.API() + "/act_" + a.ID + "/campaigns" + fb.Token() + campaignFields
 }
 
 func insightsURL(accountID string) string {
 	fields := "&fields=campaign_id,clicks,impressions,spend,cpc,cpp,cpm,ctr"
 	dates := "&date_preset=today"
 	level := "&level=campaign"
-	return v12 + "/act_" + accountID + "/insights" + token() + fields + dates + level
+	return fb.API() + "/act_" + accountID + "/insights" + fb.Token() + fields + dates + level
 }
 
 type campaign struct {
@@ -93,6 +90,18 @@ type campaign struct {
 
 	UTM     string  `json:"utm"`
 	Revenue float64 `json:"revenue"`
+	Profit  float64 `json:"profit"`
+	ROI     float64 `json:"roi"`
+}
+
+func (c campaign) spend() (out float64) {
+	if c.Spend != "" {
+		var err error
+		if out, err = strconv.ParseFloat(c.Spend, 64); err != nil {
+			log.WithError(err).Trace("spend ", c.Spend)
+		}
+	}
+	return
 }
 
 func (c campaign) utm() string {
@@ -123,12 +132,6 @@ func (c campaign) writeRequest() (out types.WriteRequest, err error) {
 		out.PutRequest = &types.PutRequest{Item: item}
 	}
 	return
-}
-
-func (c campaign) insightsURL() string {
-	fields := "&fields=campaign_id,clicks,impressions,spend,cpc,cpp,cpm,ctr"
-	dates := "&date_preset=today"
-	return v12 + "/" + c.ID + "/insights" + token() + fields + dates
 }
 
 type Insight struct {
@@ -178,6 +181,20 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 
 	if method == http.MethodPut {
 
+		if node == "root" {
+
+			if res, _ := putAccountValuesResponse(ctx); res.StatusCode != http.StatusOK {
+				return res, nil
+			}
+
+			data := api.NewRequestBytes(http.MethodPut, map[string]string{"node": "campaign"})
+			if _, err := sam.NewEvent(ctx, "plumbus_aggHandler", data); err != nil {
+				return api.Err(err)
+			}
+
+			return api.OK("")
+		}
+
 		if node == "account" {
 			return putAccountValuesResponse(ctx)
 		}
@@ -219,8 +236,7 @@ func putAccountValuesResponse(ctx context.Context) (events.APIGatewayV2HTTPRespo
 		}
 	}
 
-	data, _ := json.Marshal(&out)
-	return api.OK(string(data))
+	return api.OK("")
 }
 
 func putCampaignDetailValuesResponse(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
@@ -244,7 +260,7 @@ func putCampaignDetailValuesResponse(ctx context.Context) (events.APIGatewayV2HT
 			defer wg.Done()
 
 			var all []interface{}
-			if all, err = get(a.campaignsURL()); err != nil {
+			if all, err = fb.Get(a.campaignsURL()); err != nil {
 				log.WithError(err).Error()
 				return
 			}
@@ -262,6 +278,9 @@ func putCampaignDetailValuesResponse(ctx context.Context) (events.APIGatewayV2HT
 			}
 
 			mutex.Lock()
+			if ko, ok := out[a.ID]; ok {
+				cc = append(cc, ko...)
+			}
 			out[a.ID] = cc
 			mutex.Unlock()
 		}(a)
@@ -269,14 +288,12 @@ func putCampaignDetailValuesResponse(ctx context.Context) (events.APIGatewayV2HT
 
 	wg.Wait()
 
-	if err = addInsightData(ctx, out); err != nil {
-		return api.Err(err)
-	}
+	addInsightData(ctx, out)
 
 	return api.OK("")
 }
 
-func addInsightData(ctx context.Context, out map[string][]campaign) (err error) {
+func addInsightData(ctx context.Context, out map[string][]campaign) {
 
 	var wg sync.WaitGroup
 
@@ -288,8 +305,10 @@ func addInsightData(ctx context.Context, out map[string][]campaign) (err error) 
 
 			defer wg.Done()
 
+			var err error
+
 			var all []interface{}
-			if all, err = get(insightsURL(accountID)); err != nil {
+			if all, err = fb.Get(insightsURL(accountID)); err != nil {
 				log.Trace(err)
 				saveData(ctx, cc)
 				return
@@ -342,50 +361,100 @@ func saveData(ctx context.Context, cc []campaign) {
 	}
 }
 
+func batchGet(ctx context.Context, keys []map[string]types.AttributeValue) (got []sovrn.Entity, err error) {
+	in := &dynamodb.BatchGetItemInput{
+		RequestItems: map[string]types.KeysAndAttributes{
+			"plumbus_fb_sovrn": {
+				Keys: keys,
+			},
+		},
+	}
+	var out *dynamodb.BatchGetItemOutput
+	if out, err = repo.BatchGetItem(ctx, in); err != nil {
+		log.WithError(err).Error()
+	} else if err = attributevalue.UnmarshalListOfMaps(out.Responses["plumbus_fb_sovrn"], &got); err != nil {
+		log.WithError(err).Error()
+	}
+	return
+}
+
 func addRevenue(ctx context.Context, cc []campaign, ii []Insight) {
 
-	m := map[string]campaign{}
-	for _, c := range cc {
-		m[c.ID] = c
+	iii := map[string]Insight{}
+	for _, i := range ii {
+		iii[i.CampaignID] = i
+	}
+
+	sss := map[string]sovrn.Entity{}
+	var keys []map[string]types.AttributeValue
+	queued := map[string]campaign{}
+	for idx, c := range cc {
+
+		if _, ok := queued[c.utm()]; !ok {
+			queued[c.utm()] = c
+			keys = append(keys, map[string]types.AttributeValue{"UTM": &types.AttributeValueMemberS{Value: c.utm()}})
+			if len(keys)%25 == 0 || idx == len(cc) {
+				if got, err := batchGet(ctx, keys); err != nil {
+					log.WithError(err).Error()
+				} else {
+					for _, g := range got {
+						sss[g.UTM] = g
+					}
+				}
+				keys = []map[string]types.AttributeValue{}
+			}
+		}
+
 	}
 
 	var wg sync.WaitGroup
 
-	var r types.WriteRequest
 	var rr []types.WriteRequest
-	for _, i := range ii {
+	for _, c := range cc {
 
 		wg.Add(1)
 
-		go func(i Insight) {
+		go func(c campaign) {
 
 			defer wg.Done()
 
-			c := m[i.CampaignID]
-			c.Clicks = i.Clicks
-			c.CPM = i.Cpm
-			c.CTR = i.Ctr
-			c.CPP = i.Cpp
-			c.CPC = i.Cpc
-			c.Spend = i.Spend
-			c.Impressions = i.Impressions
-
-			var err error
-
-			var v sovrn.Entity
-			if err = repo.GetIt(v.Table(), "UTM", c.utm(), &v); err != nil {
-				log.Trace(err)
-			} else {
-				c.Revenue = v.Revenue
-				c.UTM = v.UTM
+			if i, ok := iii[c.ID]; ok {
+				c.Clicks = i.Clicks
+				c.CPM = i.Cpm
+				c.CTR = i.Ctr
+				c.CPP = i.Cpp
+				c.CPC = i.Cpc
+				c.Spend = i.Spend
+				c.Impressions = i.Impressions
 			}
 
-			if r, err = c.writeRequest(); err != nil {
-				log.Trace(err)
+			if c.Spend == "" {
+				c.Spend = "0"
+			}
+
+			if s, ok := sss[c.utm()]; ok {
+				c.UTM = s.UTM
+				c.Revenue = s.Revenue
+			}
+
+			c.Profit = c.Revenue - c.spend()
+
+			if c.Profit != 0 && c.spend() != 0 {
+				c.ROI = c.Profit / c.spend()
+			} else if c.Profit != 0 {
+				c.ROI = c.Profit * 100
+			} else if c.spend() != 0 {
+				c.ROI = c.spend() * 100
+			} else {
+				c.ROI = 0
+			}
+
+			if r, err := c.writeRequest(); err != nil {
+				log.WithError(err).Trace()
 			} else {
 				rr = append(rr, r)
 			}
-		}(i)
+		}(c)
 	}
 
 	wg.Wait()
@@ -428,12 +497,12 @@ func getAccountEntitiesResponse() (events.APIGatewayV2HTTPResponse, error) {
 func getAccountValues() (out []account, err error) {
 
 	var all []interface{}
-	if all, err = get(accountsUrl()); err != nil {
+	if all, err = fb.Get(fb.API() + "/" + fb.User() + "/adaccounts" + fb.Token() + accountFields); err != nil {
 		return nil, err
 	}
 
 	var ign map[string]interface{}
-	if ign, err = accountsToIgnore(); err != nil {
+	if ign, err = fb.AccountsToIgnore(); err != nil {
 		return
 	}
 
@@ -477,27 +546,6 @@ func getAccountValues() (out []account, err error) {
 	return
 }
 
-func accountsUrl() string {
-	return v12 + "/" + user() + "/adaccounts" + token() + accountFields
-}
-
-func accountsToIgnore() (map[string]interface{}, error) {
-
-	var in = dynamodb.ScanInput{TableName: ptr.String("plumbus_ignored_ad_accounts")}
-	var out interface{}
-	if err := repo.ScanInputAndUnmarshal(&in, &out); err != nil {
-		log.WithError(err).Error()
-		return nil, err
-	}
-
-	res := map[string]interface{}{}
-	for _, w := range out.([]interface{}) {
-		res[w.(map[string]interface{})["account_id"].(string)] = true
-	}
-
-	return res, nil
-}
-
 func getCampaignEntitiesResponse(ctx context.Context, accountID string) (events.APIGatewayV2HTTPResponse, error) {
 
 	var err error
@@ -530,70 +578,6 @@ func getCampaignEntitiesResponse(ctx context.Context, accountID string) (events.
 	}
 
 	return api.OK(string(data))
-}
-
-/*
-	fb base
-*/
-func get(url string) (data []interface{}, err error) {
-	return getAttempt(url, 1)
-}
-
-func getAttempt(url string, attempt int) (data []interface{}, err error) {
-
-	var res *http.Response
-	if res, err = http.Get(url); err != nil {
-
-		str := err.Error()
-
-		if !strings.Contains(str, "too many open files") &&
-			!strings.Contains(str, "no such host") {
-			log.WithError(err).Error()
-		}
-
-		if strings.Contains(str, "connection refused") {
-			log.Trace("chill out")
-			fmt.Println(err)
-			fmt.Println(err.Error())
-			time.Sleep(time.Second * time.Duration(attempt))
-			return getAttempt(url, attempt+1)
-		}
-
-		return
-	}
-
-	var body []byte
-	if body, err = ioutil.ReadAll(res.Body); err != nil {
-		log.WithError(err).Error()
-		return
-	}
-
-	var payload fb.Payload
-	if err = json.Unmarshal(body, &payload); err != nil {
-		log.WithError(err).Error()
-		return
-	}
-
-	if data = append(data, payload.Data...); payload.Page.Next == "" {
-		return
-	}
-
-	var next []interface{}
-	if next, err = get(payload.Page.Next); err != nil {
-		log.WithError(err).Error()
-		return
-	}
-
-	data = append(data, next...)
-	return
-}
-
-func token() string {
-	return "?access_token=" + os.Getenv("tkn")
-}
-
-func user() string {
-	return os.Getenv("usr")
 }
 
 func main() {

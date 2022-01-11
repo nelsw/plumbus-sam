@@ -11,19 +11,17 @@ import (
 	"plumbus/pkg/util/logs"
 )
 
-var (
-	input = &faas.InvokeInput{
-		FunctionName:   ptr.String("plumbus_accountHandler"),
-		InvocationType: types.InvocationTypeRequestResponse,
-		LogType:        types.LogTypeTail,
-	}
-)
-
 func init() {
 	logs.Init()
 }
 
 func AdAccountsToIgnoreMap() (out map[string]interface{}, err error) {
+
+	var input = &faas.InvokeInput{
+		FunctionName:   ptr.String("plumbus_accountHandler"),
+		InvocationType: types.InvocationTypeRequestResponse,
+		LogType:        types.LogTypeTail,
+	}
 
 	var invokeOutput *faas.InvokeOutput
 	if invokeOutput, err = sam.Invoke(context.TODO(), input); err != nil {
@@ -46,6 +44,12 @@ func AdAccountsToIgnoreMap() (out map[string]interface{}, err error) {
 }
 
 func AdAccountsToIgnoreSlice() (out []string, err error) {
+
+	var input = &faas.InvokeInput{
+		FunctionName:   ptr.String("plumbus_accountHandler"),
+		InvocationType: types.InvocationTypeRequestResponse,
+		LogType:        types.LogTypeTail,
+	}
 
 	var invokeOutput *faas.InvokeOutput
 	if invokeOutput, err = sam.Invoke(context.TODO(), input); err != nil {
