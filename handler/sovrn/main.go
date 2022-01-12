@@ -12,24 +12,26 @@ import (
 	"plumbus/pkg/util/logs"
 )
 
+var data = api.NewRequestBytes(http.MethodPost, map[string]string{"node": "root"})
+
 func init() {
 	logs.Init()
 }
 
 func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 
-	log.WithFields(log.Fields{"req": req}).Info()
+	log.WithFields(log.Fields{"ctx": ctx, "req": req}).Info()
 
-	if err := sovrn.Handle(ctx, req); err != nil {
-		log.WithError(err).Error()
+	if err := sovrn.Process(ctx, req); err != nil {
+		log.WithError(err).Error("while processing sovrn request")
+	} else if _, err = sam.NewEvent(ctx, "plumbus_aggHandler", data); err != nil {
+		log.WithError(err).Error("while invoking agg event")
 	}
 
-	data := api.NewRequestBytes(http.MethodPut, map[string]string{"node": "root"})
-	if _, err := sam.NewEvent(ctx, "plumbus_aggHandler", data); err != nil {
-		return api.Err(err)
-	}
-
-	return api.OK("")
+	// as sovrn is actively hitting this webhook,
+	// we always return a 200 from this handler
+	// to communicate successful delivery.
+	return api.K()
 }
 
 func main() {

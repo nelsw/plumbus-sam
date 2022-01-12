@@ -1,10 +1,20 @@
 // Package agg provides functionality for storing aggregate data.
+// Processes multiple data sources in a "today" time range.
+// When we begin looking at data sources by hour, use this code:
+/*
+	n := time.Now().Local()
+	dateYesterday := n.Add(time.Hour * 24 * -1).Format(dateLayout)
+	dateToday := n.Format(dateLayout)
+	dateTomorrow := n.Add(time.Hour * 24).Format(dateLayout)
+	b1 := "{since:'" + dateYesterday + "',until:'" + dateToday + "'}"
+	b2 := "{since:'" + dateToday + "',until:'" + dateTomorrow + "'}"
+	a.url += "&time_ranges=[" + strings.Join([]string{b1, b2}, ",") + "]"
+*/
 package main
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -29,6 +39,7 @@ const (
 	handlerName    = "plumbus_aggHandler"
 	accountFields  = "&fields=account_id,name,account_status,created_time"
 	campaignFields = "&fields=account_id,id,name,status,daily_budget,budget_remaining,created_time,updated_time"
+	insightsFields = "&fields=campaign_id,clicks,impressions,spend,cpc,cpp,cpm,ctr"
 )
 
 var (
@@ -53,9 +64,7 @@ type account struct {
 
 func (a account) writeRequest() (out types.WriteRequest, err error) {
 	var item map[string]types.AttributeValue
-	if item, err = attributevalue.MarshalMap(&a); err != nil {
-		log.WithError(err).Error()
-	} else {
+	if item, err = attributevalue.MarshalMap(&a); err == nil {
 		out.PutRequest = &types.PutRequest{Item: item}
 	}
 	return
@@ -65,11 +74,8 @@ func (a account) campaignsURL() string {
 	return fb.API() + "/act_" + a.ID + "/campaigns" + fb.Token() + campaignFields
 }
 
-func insightsURL(accountID string) string {
-	fields := "&fields=campaign_id,clicks,impressions,spend,cpc,cpp,cpm,ctr"
-	dates := "&date_preset=today"
-	level := "&level=campaign"
-	return fb.API() + "/act_" + accountID + "/insights" + fb.Token() + fields + dates + level
+func insightsURL(ID string) string {
+	return fb.API() + "/act_" + ID + "/insights" + fb.Token() + insightsFields + "&level=campaign&date_preset=today"
 }
 
 type campaignNode struct {
@@ -82,7 +88,7 @@ type campaign struct {
 	AccountID       string `json:"account_id"`
 	ID              string `json:"id"`
 	Name            string `json:"name"`
-	Status          string `json:"status"`
+	Circ            string `json:"status"`
 	DailyBudget     string `json:"daily_budget"`
 	RemainingBudget string `json:"remaining_budget"`
 	Created         string `json:"created_time"`
@@ -167,97 +173,107 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 
 	log.WithFields(log.Fields{"ctx": ctx, "req": req}).Info()
 
-	method := req.RequestContext.HTTP.Method
-
-	if method == http.MethodOptions {
-		return api.OK("")
-	}
-
 	node := req.QueryStringParameters["node"]
 
-	if method == http.MethodGet {
+	switch req.RequestContext.HTTP.Method {
 
-		if node == "root" {
+	case http.MethodOptions:
+		return api.K()
+
+	case http.MethodGet:
+		switch node {
+		case "root":
 			return getRoot(ctx)
+		case "account":
+			return getAccounts(ctx)
+		case "campaign":
+			return getCampaigns(ctx, req.QueryStringParameters["id"])
+		default:
+			return api.Nada()
 		}
 
-		if node == "account" {
-			return getAccountEntitiesResponse()
-		}
-
-		if node == "campaign" {
-			return getCampaignEntitiesResponse(ctx, req.QueryStringParameters["id"])
-		}
-
-	}
-
-	if method == http.MethodPut {
-
-		if node == "root" {
-
-			if res, _ := putAccountValuesResponse(ctx); res.StatusCode != http.StatusOK {
-				return res, nil
-			}
-
-			data := api.NewRequestBytes(http.MethodPut, map[string]string{"node": "campaign"})
-			if _, err := sam.NewEvent(ctx, handlerName, data); err != nil {
-				return api.Err(err)
-			}
-
-			return api.OK("")
-		}
-
-		if node == "account" {
+	case http.MethodPut:
+		switch node {
+		case "account":
 			return putAccountValuesResponse(ctx)
+		case "campaign":
+			return putCampaignDetailValuesResponse(ctx)
+		default:
+			return api.Nada()
 		}
 
-		if node == "campaign" {
-
-			if res, _ := putCampaignDetailValuesResponse(ctx); res.StatusCode != http.StatusOK {
-				return res, nil
-			}
-
-			if _, err := sam.NewEvent(ctx, "plumbus_ruleHandler", api.NewRequestBytes(http.MethodPost, nil)); err != nil {
-				return api.Err(err)
-			}
-
-			return api.OK("")
+	case http.MethodPost:
+		switch node {
+		case "root":
+			return postRoot(ctx)
+		case "account":
+			return postAccounts(ctx)
+		case "campaign":
+			return postCampaigns(ctx)
+		default:
+			return api.Nada()
 		}
+
+	default:
+		return api.Nada()
 	}
+}
 
-	return api.Err(errors.New("nothing handled"))
+func postRoot(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
+	data := api.NewRequestBytes(http.MethodPost, map[string]string{"node": "account"})
+	if _, err := sam.NewEvent(ctx, handlerName, data); err != nil {
+		return api.Err(err)
+	}
+	return api.K()
+}
 
+func postAccounts(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
+	if res, _ := putAccountValuesResponse(ctx); res.StatusCode != http.StatusOK {
+		return res, nil
+	}
+	data := api.NewRequestBytes(http.MethodPost, map[string]string{"node": "campaign"})
+	if _, err := sam.NewEvent(ctx, handlerName, data); err != nil {
+		return api.Err(err)
+	}
+	return api.K()
+}
+
+func postCampaigns(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
+	if res, _ := putCampaignDetailValuesResponse(ctx); res.StatusCode != http.StatusOK {
+		return res, nil
+	}
+	data := api.NewRequestBytes(http.MethodPost, nil)
+	if _, err := sam.NewEvent(ctx, "plumbus_ruleHandler", data); err != nil {
+		return api.Err(err)
+	}
+	return api.K()
 }
 
 func putAccountValuesResponse(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 
-	var err error
-
-	var out []account
-	if out, err = getAccountValues(); err != nil {
+	if aa, err := getAccountValues(ctx); err != nil {
 		return api.Err(err)
-	}
+	} else {
 
-	qty := len(out)
+		var ww []types.WriteRequest
 
-	var w types.WriteRequest
-	var ww []types.WriteRequest
-	for i, o := range out {
-
-		if w, err = o.writeRequest(); err != nil {
-			log.Trace(err)
-			continue
-		}
-
-		if ww = append(ww, w); len(ww)%25 == 0 || i == qty {
-			if _, err = repo.BatchWriteItems(ctx, accountTable, ww); err != nil {
-				log.Trace(err)
+		for _, a := range aa {
+			if w, err := a.writeRequest(); err != nil {
+				log.WithFields(log.Fields{"id": a.ID}).
+					WithError(err).
+					Error("converting an account value to a write request")
+			} else {
+				ww = append(ww, w)
 			}
-			ww = []types.WriteRequest{}
 		}
-	}
 
-	return api.OK("")
+		if err := repo.BatchWriteItems(ctx, accountTable, ww); err != nil {
+			log.WithError(err).Error("agg account value batch write items")
+			return api.Err(err)
+		}
+
+		return api.K()
+	}
 }
 
 func putCampaignDetailValuesResponse(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
@@ -265,7 +281,7 @@ func putCampaignDetailValuesResponse(ctx context.Context) (events.APIGatewayV2HT
 	var err error
 
 	var aa []account
-	if err = repo.Scan(&dynamodb.ScanInput{TableName: &accountTable}, &aa); err != nil {
+	if err = repo.Scan(ctx, &dynamodb.ScanInput{TableName: &accountTable}, &aa); err != nil {
 		return api.Err(err)
 	}
 
@@ -330,27 +346,27 @@ func addInsightData(ctx context.Context, out map[string][]campaign) {
 
 			var all []interface{}
 			if all, err = fb.Get(insightsURL(accountID)); err != nil {
-				log.Trace(err)
-				saveData(ctx, cc)
+				log.WithError(err).Error()
+				saveCampaigns(ctx, cc)
 				return
 			}
 
 			if len(all) == 0 {
-				saveData(ctx, cc)
+				saveCampaigns(ctx, cc)
 				return
 			}
 
 			var data []byte
 			if data, err = json.Marshal(&all); err != nil {
-				log.Trace(err)
-				saveData(ctx, cc)
+				log.WithError(err).Error()
+				saveCampaigns(ctx, cc)
 				return
 			}
 
 			var ii []insight
 			if err = json.Unmarshal(data, &ii); err != nil {
-				log.Trace(err)
-				saveData(ctx, cc)
+				log.WithError(err).Error()
+				saveCampaigns(ctx, cc)
 				return
 			}
 
@@ -364,21 +380,19 @@ func addInsightData(ctx context.Context, out map[string][]campaign) {
 	return
 }
 
-func saveData(ctx context.Context, cc []campaign) {
+func saveCampaigns(ctx context.Context, cc []campaign) {
 
 	var rr []types.WriteRequest
 	for _, c := range cc {
 		if r, err := c.writeRequest(); err != nil {
-			log.Trace(err)
+			log.WithError(err).Error()
 		} else {
 			rr = append(rr, r)
 		}
 	}
 
-	for _, c := range chunkSlice(rr, 25) {
-		if _, err := repo.BatchWriteItems(ctx, campaignTable, c); err != nil {
-			log.WithError(err).Error()
-		}
+	if err := repo.BatchWriteItems(ctx, campaignTable, rr); err != nil {
+		log.WithError(err).Error()
 	}
 }
 
@@ -482,39 +496,38 @@ func addRevenue(ctx context.Context, cc []campaign, ii []insight) {
 
 	wg.Wait()
 
-	for _, c := range chunkSlice(rr, 25) {
-		if _, err := repo.BatchWriteItems(ctx, campaignTable, c); err != nil {
-			log.WithError(err).Error()
-		}
+	if err := repo.BatchWriteItems(ctx, campaignTable, rr); err != nil {
+		log.WithError(err).Error()
 	}
 }
 
-func chunkSlice(slice []types.WriteRequest, size int) (chunks [][]types.WriteRequest) {
-	var end int
-	for i := 0; i < len(slice); i += size {
-		if end = i + size; end > len(slice) {
-			end = len(slice)
-		}
-		chunks = append(chunks, slice[i:end])
-	}
-	return
-}
-
-func getAccountEntitiesResponse() (events.APIGatewayV2HTTPResponse, error) {
+func getAccounts(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 
 	var out []account
-	if err := repo.Scan(&dynamodb.ScanInput{TableName: &accountTable}, &out); err != nil {
+	if err := repo.Scan(ctx, &dynamodb.ScanInput{TableName: &accountTable}, &out); err != nil {
 		return api.Err(err)
 	}
 
-	if data, err := json.Marshal(&out); err != nil {
+	if ign, err := fb.AccountsToIgnore(ctx); err != nil {
 		return api.Err(err)
 	} else {
-		return api.OK(string(data))
+
+		var aa []account
+		for _, a := range out {
+			if _, ok := ign[a.ID]; !ok {
+				aa = append(aa, a)
+			}
+		}
+
+		if data, err := json.Marshal(&aa); err != nil {
+			return api.Err(err)
+		} else {
+			return api.OK(string(data))
+		}
 	}
 }
 
-func getAccountValues() (out []account, err error) {
+func getAccountValues(ctx context.Context) (out []account, err error) {
 
 	var all []interface{}
 	if all, err = fb.Get(fb.API() + "/" + fb.User() + "/adaccounts" + fb.Token() + accountFields); err != nil {
@@ -522,7 +535,7 @@ func getAccountValues() (out []account, err error) {
 	}
 
 	var ign map[string]interface{}
-	if ign, err = fb.AccountsToIgnore(); err != nil {
+	if ign, err = fb.AccountsToIgnore(ctx); err != nil {
 		return
 	}
 
@@ -561,7 +574,7 @@ func getAccountValues() (out []account, err error) {
 	return
 }
 
-func getCampaignEntitiesResponse(ctx context.Context, accountID string) (events.APIGatewayV2HTTPResponse, error) {
+func getCampaigns(ctx context.Context, accountID string) (events.APIGatewayV2HTTPResponse, error) {
 
 	var err error
 
@@ -598,29 +611,36 @@ func getCampaignEntitiesResponse(ctx context.Context, accountID string) (events.
 func getRoot(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 
 	var aa []accountNode
-	if err := repo.Scan(&dynamodb.ScanInput{TableName: &accountTable}, &aa); err != nil {
+	if err := repo.Scan(ctx, &dynamodb.ScanInput{TableName: &accountTable}, &aa); err != nil {
 		return api.Err(err)
 	}
 
-	var out []accountNode
-	var wg sync.WaitGroup
-	for _, a := range aa {
-		wg.Add(1)
-		go func(a accountNode) {
-			defer wg.Done()
-			var err error
-			if a.Kids, err = campaigns(ctx, a.ID); err != nil {
-				log.WithError(err).Error()
-			}
-			out = append(out, a)
-		}(a)
-	}
-	wg.Wait()
-
-	if data, err := json.Marshal(&out); err != nil {
+	if ign, err := fb.AccountsToIgnore(ctx); err != nil {
 		return api.Err(err)
 	} else {
-		return api.OnlyOK(string(data))
+		var out []accountNode
+		var wg sync.WaitGroup
+		for _, a := range aa {
+			if _, ok := ign[a.ID]; ok {
+				continue
+			}
+			wg.Add(1)
+			go func(a accountNode) {
+				defer wg.Done()
+				var err error
+				if a.Kids, err = campaigns(ctx, a.ID); err != nil {
+					log.WithError(err).Error()
+				}
+				out = append(out, a)
+			}(a)
+		}
+		wg.Wait()
+
+		if data, err := json.Marshal(&out); err != nil {
+			return api.Err(err)
+		} else {
+			return api.OnlyOK(string(data))
+		}
 	}
 }
 
@@ -637,10 +657,7 @@ func campaigns(ctx context.Context, accountID string) (cc []campaignNode, err er
 	var out *dynamodb.QueryOutput
 	if out, err = repo.Query(ctx, in); err != nil {
 		log.WithError(err).Error()
-		return
-	}
-
-	if err = attributevalue.UnmarshalListOfMaps(out.Items, &cc); err != nil {
+	} else if err = attributevalue.UnmarshalListOfMaps(out.Items, &cc); err != nil {
 		log.WithError(err).Error()
 	}
 

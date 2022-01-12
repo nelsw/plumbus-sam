@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"github.com/aws/aws-lambda-go/events"
 	log "github.com/sirupsen/logrus"
 	"net/http"
@@ -18,8 +19,16 @@ func Err(err error) (events.APIGatewayV2HTTPResponse, error) {
 	return worker(http.StatusBadRequest, err.Error())
 }
 
+func Nada() (events.APIGatewayV2HTTPResponse, error) {
+	return Err(errors.New("nothing handled"))
+}
+
 func OK(body string) (events.APIGatewayV2HTTPResponse, error) {
 	return worker(http.StatusOK, body)
+}
+
+func K() (events.APIGatewayV2HTTPResponse, error) {
+	return worker(http.StatusOK, "")
 }
 
 func OnlyOK(body string) (events.APIGatewayV2HTTPResponse, error) {

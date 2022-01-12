@@ -19,7 +19,10 @@ import (
 	"time"
 )
 
-var table = "plumbus_fb_rule"
+var (
+	table     = "plumbus_fb_rule"
+	scanInput = dynamodb.ScanInput{TableName: &table}
+)
 
 type Rule struct {
 	ID          string      `json:"id"`
@@ -62,88 +65,95 @@ func init() {
 	logs.Init()
 }
 
-func handle(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 
-	log.WithFields(log.Fields{"ctx": ctx, "req": request}).Info()
+	log.WithFields(log.Fields{"ctx": ctx, "req": req}).Info()
 
-	method := request.RequestContext.HTTP.Method
+	switch req.RequestContext.HTTP.Method {
 
-	if method == http.MethodOptions {
-		return api.OK("")
+	case http.MethodOptions:
+		return api.K()
+
+	case http.MethodGet:
+		return handleGet(ctx)
+
+	case http.MethodPut:
+		return handlePut(ctx, []byte(req.Body))
+
+	case http.MethodDelete:
+		return handleDelete(ctx, req.QueryStringParameters["id"])
+
+	case http.MethodPost:
+		return handlePost(ctx)
+
+	default:
+		return api.Err(errors.New("nothing handled"))
+	}
+}
+
+func handleGet(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
+
+	var out []Rule
+	if err := repo.Scan(ctx, &scanInput, &out); err != nil {
+		return api.Err(err)
 	}
 
-	if method == http.MethodGet {
+	var data []byte
+	data, _ = json.Marshal(out)
+	return api.OK(string(data))
+}
 
-		var out interface{}
-		if err := repo.ScanInputAndUnmarshal(&dynamodb.ScanInput{TableName: &table}, &out); err != nil {
-			return api.Err(err)
-		}
+func handlePut(ctx context.Context, data []byte) (events.APIGatewayV2HTTPResponse, error) {
 
-		var rules []Rule
-
-		bytes, _ := json.Marshal(out)
-		if err := json.Unmarshal(bytes, &rules); err != nil {
-			return api.Err(err)
-		}
-
-		bytes, _ = json.Marshal(rules)
-		return api.OK(string(bytes))
+	var rule Rule
+	if err := json.Unmarshal(data, &rule); err != nil {
+		return api.Err(err)
 	}
 
-	if method == http.MethodPut {
+	now := time.Now().UTC()
+	if rule.Updated = now; rule.ID == "" {
+		rule.ID = uuid.NewString()
+		rule.Created = now
+	}
 
-		var err error
-
-		var rule Rule
-		if err = json.Unmarshal([]byte(request.Body), &rule); err != nil {
-			return api.Err(err)
+	for index, condition := range rule.Conditions {
+		if rule.Conditions[index].Updated = now; condition.ID == "" {
+			rule.Conditions[index].ID = uuid.NewString()
+			rule.Conditions[index].Created = now
 		}
+	}
 
-		now := time.Now().UTC()
-		rule.Updated = now
-		if rule.ID == "" {
-			rule.ID = uuid.NewString()
-			rule.Created = now
-		}
-
-		for index, condition := range rule.Conditions {
-			rule.Conditions[index].Updated = now
-			if condition.ID == "" {
-				rule.Conditions[index].ID = uuid.NewString()
-				rule.Conditions[index].Created = now
-			}
-		}
-
-		var item map[string]types.AttributeValue
-		if item, err = attributevalue.MarshalMap(&rule); err != nil {
-			return api.Err(err)
-		}
-
-		if err = repo.Put(&dynamodb.PutItemInput{Item: item, TableName: &table}); err != nil {
-			return api.Err(err)
-		}
-
+	if item, err := attributevalue.MarshalMap(&rule); err != nil {
+		return api.Err(err)
+	} else if err = repo.Put(ctx, &dynamodb.PutItemInput{Item: item, TableName: &table}); err != nil {
+		return api.Err(err)
+	} else {
 		bytes, _ := json.Marshal(&rule)
 		return api.OK(string(bytes))
 	}
+}
 
-	if method == http.MethodDelete {
+func handleDelete(ctx context.Context, id string) (events.APIGatewayV2HTTPResponse, error) {
 
-		id := request.QueryStringParameters["id"]
-		if err := repo.DelByEntry(table, "ID", id); err != nil {
-			return api.Err(err)
-		}
-
-		return api.OK("")
+	in := &dynamodb.DeleteItemInput{
+		TableName: &table,
+		Key: map[string]types.AttributeValue{
+			"ID": &types.AttributeValueMemberS{
+				Value: id,
+			},
+		},
 	}
 
-	if method == http.MethodPost {
-		// todo - assess
-		fmt.Println("not yet running")
-		return api.OK("")
+	if err := repo.DeleteItem(ctx, in); err != nil {
+		return api.Err(err)
 	}
 
-	return api.Err(errors.New("nothing handled"))
+	return api.OK("")
+}
+
+func handlePost(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
+	fmt.Println("not yet running") // todo - assess
+	return api.OK("")
 }
 
 func main() {

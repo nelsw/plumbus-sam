@@ -20,7 +20,7 @@ type payload struct {
 	} `json:"attachment"`
 }
 
-type Value struct {
+type value struct {
 	UTM         string  `json:"impressions.utm_campaign"`
 	Revenue     float64 `json:"impressions.estimated_revenue"`
 	Impressions int     `json:"impressions.total_ad_impressions"`
@@ -38,52 +38,60 @@ type Entity struct {
 	PageViews   int     `json:"PageViews"`
 }
 
-func (e Entity) Table() string {
-	return table
-}
-
-func (v Value) putRequest() (*types.PutRequest, error) {
-	if item, err := attributevalue.MarshalMap(&v); err != nil {
-		return nil, err
-	} else {
-		return &types.PutRequest{Item: item}, nil
+func (v value) writeRequest() (out types.WriteRequest, err error) {
+	var item map[string]types.AttributeValue
+	if item, err = attributevalue.MarshalMap(&v); err == nil {
+		out.PutRequest = &types.PutRequest{Item: item}
 	}
+	return
 }
 
 func init() {
 	logs.Init()
 }
 
-func Handle(ctx context.Context, request events.APIGatewayV2HTTPRequest) (err error) {
+func Process(ctx context.Context, request events.APIGatewayV2HTTPRequest) (err error) {
 
-	var p payload
-	if err = json.Unmarshal([]byte(strings.TrimLeft(request.Body, "attachment")), &p); err != nil {
-		log.WithError(err).Error()
+	var pay payload
+	if err = json.Unmarshal([]byte(strings.TrimLeft(request.Body, "attachment")), &pay); err != nil {
+		log.WithError(err).Error("unable to interpret request.Body attachment payload")
 		return
 	}
 
-	var vv []Value
-	if err = json.Unmarshal([]byte(p.Attachment.Data), &vv); err != nil {
-		log.WithError(err).Error()
-		return
+	log.Trace("unmarshalled sovrn payload from request.Body attachment")
+
+	var vv []value
+	if err = json.Unmarshal([]byte(pay.Attachment.Data), &vv); err != nil {
+		log.WithError(err).Error("unable to unmarshal payload attachment data into sovrn value slice")
+		return err
 	}
 
-	groups := map[string][]Value{}
-	for _, value := range vv {
-		if value.UTM == "" {
-			log.Trace("value missing campaign id", value)
-		} else if _, ok := groups[value.UTM]; ok {
-			groups[value.UTM] = append(groups[value.UTM], value)
+	log.WithFields(log.Fields{"size": len(vv)}).Trace("unmarshalled sovrn values from payload attachment data")
+
+	// as each sovrn value represents a campaign,
+	// we group sovrn values by (campaign) UTM
+	// to sum and average value data points.
+	groups := map[string][]value{}
+	for _, v := range vv {
+		if v.UTM == "" {
+			log.Trace("value missing campaign id", v)
+		} else if _, ok := groups[v.UTM]; ok {
+			groups[v.UTM] = append(groups[v.UTM], v)
 		} else {
-			groups[value.UTM] = []Value{value}
+			groups[v.UTM] = []value{v}
 		}
 	}
 
-	var r *types.PutRequest
+	log.WithFields(log.Fields{"size": len(vv)}).Trace("sovrn value groups")
+
+	// here we perform said
+	// summation and averaging,
+	// before persisting to db.
+	var r types.WriteRequest
 	var rr []types.WriteRequest
 	for utm, group := range groups {
 
-		v := Value{UTM: utm}
+		v := value{UTM: utm}
 
 		for _, g := range group {
 			v.Revenue += g.Revenue
@@ -95,31 +103,18 @@ func Handle(ctx context.Context, request events.APIGatewayV2HTTPRequest) (err er
 
 		v.CTR /= float64(len(group))
 
-		if r, err = v.putRequest(); err != nil {
-			log.WithError(err).Error()
-			return
-		}
-
-		rr = append(rr, types.WriteRequest{PutRequest: r})
-	}
-
-	for _, c := range chunkSlice(rr, 25) {
-		if _, err = repo.BatchWriteItems(ctx, table, c); err != nil {
-			log.WithError(err).Error()
-			return
+		if r, err = v.writeRequest(); err != nil {
+			log.WithError(err).Error("sovrn value to write request")
+		} else {
+			rr = append(rr, r)
 		}
 	}
 
-	return
-}
-
-func chunkSlice(slice []types.WriteRequest, size int) (chunks [][]types.WriteRequest) {
-	var end int
-	for i := 0; i < len(slice); i += size {
-		if end = i + size; end > len(slice) {
-			end = len(slice)
-		}
-		chunks = append(chunks, slice[i:end])
+	if err = repo.BatchWriteItems(ctx, table, rr); err != nil {
+		log.WithError(err).Error("sovrn value batch write items")
+	} else {
+		log.WithFields(log.Fields{"size": len(rr)}).Trace("sovrn value batch write items")
 	}
+
 	return
 }

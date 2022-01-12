@@ -1,6 +1,7 @@
 package fb
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/smithy-go/ptr"
@@ -9,12 +10,46 @@ import (
 	"net/http"
 	"os"
 	"plumbus/pkg/repo"
+	"plumbus/pkg/util/logs"
 	"strings"
 	"time"
 )
 
 const (
-	api = "https://graph.facebook.com/v12.0"
+	api             = "https://graph.facebook.com/v12.0"
+	formContentType = "application/x-www-form-urlencoded"
+)
+
+type CampaignStatus string
+
+const (
+	ActiveCampaign   CampaignStatus = "ACTIVE"
+	PausedCampaign   CampaignStatus = "PAUSED"
+	DeletedCampaign  CampaignStatus = "DELETED"
+	ArchivedCampaign CampaignStatus = "ARCHIVED"
+)
+
+func (s CampaignStatus) Status() string {
+	return "&status=" + string(s)
+}
+
+func (s CampaignStatus) String() string {
+	return string(s)
+}
+
+var (
+	accountStatuses = map[int]string{
+		1:   "Active",
+		2:   "Disabled",
+		3:   "Unsettled",
+		7:   "PendingRiskReview",
+		8:   "PendingSettlement",
+		9:   "InGracePeriod",
+		100: "PendingClosure",
+		101: "Closed",
+		201: "AnyActive",
+		202: "AnyClosed",
+	}
 )
 
 type payload struct {
@@ -24,8 +59,19 @@ type payload struct {
 	} `json:"paging"`
 }
 
+func init() {
+	logs.Init()
+}
+
 func Get(url string) (data []interface{}, err error) {
 	return getAttempt(url, 1)
+}
+
+func UpdateCampaignStatus(id string, s CampaignStatus) (err error) {
+	if _, err = http.Post(api+"/"+id+Token()+s.Status(), formContentType, nil); err != nil {
+		log.WithError(err).Error()
+	}
+	return
 }
 
 func getAttempt(url string, attempt int) (data []interface{}, err error) {
@@ -88,11 +134,11 @@ func API() string {
 	return api
 }
 
-func AccountsToIgnore() (map[string]interface{}, error) {
+func AccountsToIgnore(ctx context.Context) (map[string]interface{}, error) {
 
 	var in = dynamodb.ScanInput{TableName: ptr.String("plumbus_ignored_ad_accounts")}
 	var out interface{}
-	if err := repo.ScanInputAndUnmarshal(&in, &out); err != nil {
+	if err := repo.Scan(ctx, &in, &out); err != nil {
 		log.WithError(err).Error()
 		return nil, err
 	}

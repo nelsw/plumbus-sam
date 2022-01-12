@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"github.com/aws/aws-lambda-go/events"
 	"net/http"
 	"plumbus/pkg/util"
@@ -10,72 +9,60 @@ import (
 )
 
 var (
-	ctx = context.TODO()
+	ctx             = context.TODO()
+	rootParam       = map[string]string{"node": "root"}
+	accountParam    = map[string]string{"node": "account"}
+	campaignParam   = map[string]string{"node": "campaign"}
+	campaignIDParam = map[string]string{"node": "campaign", "id": "414566673354941"}
 )
 
-func TestPutRoot(t *testing.T) {
-	req := newRequest(http.MethodPut, map[string]string{"node": "root"})
-
-	if res, _ := handle(ctx, req); res.StatusCode != http.StatusOK {
-		t.Error(res.StatusCode, res.Body)
-		return
-	}
-}
-
 func TestPutAccounts(t *testing.T) {
-
-	req := newRequest(http.MethodPut, map[string]string{"node": "account"})
-
-	if res, _ := handle(ctx, req); res.StatusCode != http.StatusOK {
+	if res, _ := handle(ctx, newRequest(http.MethodPut, accountParam)); res.StatusCode != http.StatusOK {
 		t.Error(res.StatusCode, res.Body)
-		return
 	}
 }
 
 func TestPutCampaigns(t *testing.T) {
-
-	req := newRequest(http.MethodPut, map[string]string{"node": "campaign"})
-
-	if res, _ := handle(ctx, req); res.StatusCode != http.StatusOK {
+	if res, _ := handle(ctx, newRequest(http.MethodPut, campaignParam)); res.StatusCode != http.StatusOK {
 		t.Error(res.StatusCode, res.Body)
-		return
+	}
+}
+
+func TestPostRoot(t *testing.T) {
+	if res, _ := handle(ctx, newRequest(http.MethodPost, rootParam)); res.StatusCode != http.StatusOK {
+		t.Error(res.StatusCode, res.Body)
+	}
+}
+
+func TestPostAccounts(t *testing.T) {
+	if res, _ := handle(ctx, newRequest(http.MethodPost, accountParam)); res.StatusCode != http.StatusOK {
+		t.Error(res.StatusCode, res.Body)
+	}
+}
+
+func TestPostCampaigns(t *testing.T) {
+	if res, _ := handle(ctx, newRequest(http.MethodPost, campaignParam)); res.StatusCode != http.StatusOK {
+		t.Error(res.StatusCode, res.Body)
 	}
 }
 
 func TestGetRoot(t *testing.T) {
-
-	req := newRequest(http.MethodGet, map[string]string{"node": "root"})
-
-	if res, _ := handle(ctx, req); res.StatusCode != http.StatusOK {
+	if res, _ := handle(ctx, newRequest(http.MethodGet, rootParam)); res.StatusCode != http.StatusOK {
 		t.Error(res.StatusCode, res.Body)
-		return
-	} else {
-		var aa []accountNode
-		if err := json.Unmarshal([]byte(res.Body), &aa); err != nil {
-			t.Error(err)
-		} else {
-			util.PrettyPrint(aa)
-		}
 	}
 }
 
 func TestGetAccounts(t *testing.T) {
-
-	req := newRequest(http.MethodGet, map[string]string{"node": "account"})
-
-	if res, _ := handle(ctx, req); res.StatusCode != http.StatusOK {
+	if res, _ := handle(ctx, newRequest(http.MethodGet, accountParam)); res.StatusCode != http.StatusOK {
 		t.Error(res.StatusCode, res.Body)
-		return
+	} else {
+		util.PrettyPrint(res.Body)
 	}
 }
 
 func TestGetCampaigns(t *testing.T) {
-
-	req := newRequest(http.MethodGet, map[string]string{"node": "campaign", "id": "414566673354941"})
-
-	if res, _ := handle(ctx, req); res.StatusCode != http.StatusOK {
+	if res, _ := handle(ctx, newRequest(http.MethodGet, campaignIDParam)); res.StatusCode != http.StatusOK {
 		t.Error(res.StatusCode, res.Body)
-		return
 	}
 }
 
