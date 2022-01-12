@@ -26,6 +26,7 @@ import (
 )
 
 const (
+	handlerName    = "plumbus_aggHandler"
 	accountFields  = "&fields=account_id,name,account_status,created_time"
 	campaignFields = "&fields=account_id,id,name,status,daily_budget,budget_remaining,created_time,updated_time"
 )
@@ -36,6 +37,13 @@ var (
 	mutex         = &sync.Mutex{}
 )
 
+type accountNode struct {
+	ID     string         `json:"id"`
+	Name   string         `json:"name"`
+	Status string         `json:"status"`
+	Kids   []campaignNode `json:"children"`
+}
+
 type account struct {
 	ID      string `json:"account_id"`
 	Name    string `json:"name"`
@@ -43,18 +51,12 @@ type account struct {
 	Created string `json:"created_time"`
 }
 
-func (a account) putRequest() (*types.PutRequest, error) {
-	if item, err := attributevalue.MarshalMap(&a); err != nil {
-		log.Trace(err)
-		return nil, err
-	} else {
-		return &types.PutRequest{Item: item}, nil
-	}
-}
-
 func (a account) writeRequest() (out types.WriteRequest, err error) {
-	if out.PutRequest, err = a.putRequest(); err != nil {
-		log.Trace(err)
+	var item map[string]types.AttributeValue
+	if item, err = attributevalue.MarshalMap(&a); err != nil {
+		log.WithError(err).Error()
+	} else {
+		out.PutRequest = &types.PutRequest{Item: item}
 	}
 	return
 }
@@ -68,6 +70,12 @@ func insightsURL(accountID string) string {
 	dates := "&date_preset=today"
 	level := "&level=campaign"
 	return fb.API() + "/act_" + accountID + "/insights" + fb.Token() + fields + dates + level
+}
+
+type campaignNode struct {
+	ID        string `json:"id"`
+	AccountID string `json:"account_id"`
+	Name      string `json:"name"`
 }
 
 type campaign struct {
@@ -134,7 +142,7 @@ func (c campaign) writeRequest() (out types.WriteRequest, err error) {
 	return
 }
 
-type Insight struct {
+type insight struct {
 	CampaignID  string `json:"campaign_id"`
 	Clicks      string `json:"clicks"`
 	Cpc         string `json:"cpc"`
@@ -169,6 +177,10 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 
 	if method == http.MethodGet {
 
+		if node == "root" {
+			return getRoot(ctx)
+		}
+
 		if node == "account" {
 			return getAccountEntitiesResponse()
 		}
@@ -188,11 +200,9 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 			}
 
 			data := api.NewRequestBytes(http.MethodPut, map[string]string{"node": "campaign"})
-			if _, err := sam.NewEvent(ctx, "plumbus_aggHandler", data); err != nil {
+			if _, err := sam.NewEvent(ctx, handlerName, data); err != nil {
 				return api.Err(err)
 			}
-
-			// todo - run rules
 
 			return api.OK("")
 		}
@@ -202,7 +212,16 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 		}
 
 		if node == "campaign" {
-			return putCampaignDetailValuesResponse(ctx)
+
+			if res, _ := putCampaignDetailValuesResponse(ctx); res.StatusCode != http.StatusOK {
+				return res, nil
+			}
+
+			if _, err := sam.NewEvent(ctx, "plumbus_ruleHandler", api.NewRequestBytes(http.MethodPost, nil)); err != nil {
+				return api.Err(err)
+			}
+
+			return api.OK("")
 		}
 	}
 
@@ -328,7 +347,7 @@ func addInsightData(ctx context.Context, out map[string][]campaign) {
 				return
 			}
 
-			var ii []Insight
+			var ii []insight
 			if err = json.Unmarshal(data, &ii); err != nil {
 				log.Trace(err)
 				saveData(ctx, cc)
@@ -380,9 +399,9 @@ func batchGet(ctx context.Context, keys []map[string]types.AttributeValue) (got 
 	return
 }
 
-func addRevenue(ctx context.Context, cc []campaign, ii []Insight) {
+func addRevenue(ctx context.Context, cc []campaign, ii []insight) {
 
-	iii := map[string]Insight{}
+	iii := map[string]insight{}
 	for _, i := range ii {
 		iii[i.CampaignID] = i
 	}
@@ -483,19 +502,16 @@ func chunkSlice(slice []types.WriteRequest, size int) (chunks [][]types.WriteReq
 
 func getAccountEntitiesResponse() (events.APIGatewayV2HTTPResponse, error) {
 
-	var err error
-
 	var out []account
-	if err = repo.Scan(&dynamodb.ScanInput{TableName: &accountTable}, &out); err != nil {
+	if err := repo.Scan(&dynamodb.ScanInput{TableName: &accountTable}, &out); err != nil {
 		return api.Err(err)
 	}
 
-	var data []byte
-	if data, err = json.Marshal(&out); err != nil {
+	if data, err := json.Marshal(&out); err != nil {
 		return api.Err(err)
+	} else {
+		return api.OK(string(data))
 	}
-
-	return api.OK(string(data))
 }
 
 func getAccountValues() (out []account, err error) {
@@ -533,11 +549,6 @@ func getAccountValues() (out []account, err error) {
 			var a account
 			if err = json.Unmarshal(data, &a); err != nil {
 				log.WithError(err).Error()
-				return
-			}
-
-			if a == (account{}) {
-				log.Trace("empty account ", string(data))
 				return
 			}
 
@@ -582,6 +593,58 @@ func getCampaignEntitiesResponse(ctx context.Context, accountID string) (events.
 	}
 
 	return api.OK(string(data))
+}
+
+func getRoot(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
+
+	var aa []accountNode
+	if err := repo.Scan(&dynamodb.ScanInput{TableName: &accountTable}, &aa); err != nil {
+		return api.Err(err)
+	}
+
+	var out []accountNode
+	var wg sync.WaitGroup
+	for _, a := range aa {
+		wg.Add(1)
+		go func(a accountNode) {
+			defer wg.Done()
+			var err error
+			if a.Kids, err = campaigns(ctx, a.ID); err != nil {
+				log.WithError(err).Error()
+			}
+			out = append(out, a)
+		}(a)
+	}
+	wg.Wait()
+
+	if data, err := json.Marshal(&out); err != nil {
+		return api.Err(err)
+	} else {
+		return api.OnlyOK(string(data))
+	}
+}
+
+func campaigns(ctx context.Context, accountID string) (cc []campaignNode, err error) {
+
+	in := &dynamodb.QueryInput{
+		TableName:              &campaignTable,
+		KeyConditionExpression: ptr.String("AccountID = :v1"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":v1": &types.AttributeValueMemberS{Value: accountID},
+		},
+	}
+
+	var out *dynamodb.QueryOutput
+	if out, err = repo.Query(ctx, in); err != nil {
+		log.WithError(err).Error()
+		return
+	}
+
+	if err = attributevalue.UnmarshalListOfMaps(out.Items, &cc); err != nil {
+		log.WithError(err).Error()
+	}
+
+	return
 }
 
 func main() {

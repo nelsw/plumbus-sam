@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/aws/aws-lambda-go/events"
 	"net/http"
+	"plumbus/pkg/util"
 	"testing"
 )
 
@@ -37,6 +39,23 @@ func TestPutCampaigns(t *testing.T) {
 	if res, _ := handle(ctx, req); res.StatusCode != http.StatusOK {
 		t.Error(res.StatusCode, res.Body)
 		return
+	}
+}
+
+func TestGetRoot(t *testing.T) {
+
+	req := newRequest(http.MethodGet, map[string]string{"node": "root"})
+
+	if res, _ := handle(ctx, req); res.StatusCode != http.StatusOK {
+		t.Error(res.StatusCode, res.Body)
+		return
+	} else {
+		var aa []accountNode
+		if err := json.Unmarshal([]byte(res.Body), &aa); err != nil {
+			t.Error(err)
+		} else {
+			util.PrettyPrint(aa)
+		}
 	}
 }
 

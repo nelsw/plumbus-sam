@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -21,14 +22,17 @@ import (
 var table = "plumbus_fb_rule"
 
 type Rule struct {
-	ID         string      `json:"id"`
-	Name       string      `json:"name"`
-	Status     bool        `json:"status"` // on / off
-	Scope      []string    `json:"scope"`  // account id's
-	Conditions []Condition `json:"conditions"`
-	Action     bool        `json:"action"` // enable / disable
-	Created    time.Time   `json:"created"`
-	Updated    time.Time   `json:"updated"`
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Status      bool        `json:"status"` // on / off
+	Conditions  []Condition `json:"conditions"`
+	Action      bool        `json:"action"` // enable / disable
+	Created     time.Time   `json:"created"`
+	Updated     time.Time   `json:"updated"`
+	AccountIDS  []string    `json:"account_ids"`
+	CampaignIDS []string    `json:"campaign_ids"`
+
+	Scope []string `json:"scope"` // deprecated
 }
 
 type Target string
@@ -130,6 +134,12 @@ func handle(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events
 			return api.Err(err)
 		}
 
+		return api.OK("")
+	}
+
+	if method == http.MethodPost {
+		// todo - assess
+		fmt.Println("not yet running")
 		return api.OK("")
 	}
 

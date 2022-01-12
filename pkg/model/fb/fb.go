@@ -8,9 +8,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"plumbus/pkg/fb"
 	"plumbus/pkg/repo"
-	"plumbus/pkg/util"
 	"strings"
 	"time"
 )
@@ -19,55 +17,11 @@ const (
 	api = "https://graph.facebook.com/v12.0"
 )
 
-type Payload struct {
+type payload struct {
 	Data []interface{} `json:"data"`
 	Page struct {
 		Next string `json:"next"`
 	} `json:"paging"`
-}
-
-type Account struct {
-	ID        string     `json:"id"`
-	AccountID string     `json:"account_id"`
-	Name      string     `json:"name"`
-	Status    int        `json:"account_status"`
-	Created   string     `json:"created_time"`
-	Campaigns []Campaign `json:"children,omitempty"`
-}
-
-type Campaign struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Status          string `json:"status"`
-	DailyBudget     string `json:"daily_budget,omitempty"`
-	RemainingBudget string `json:"remaining_budget,omitempty"`
-	Created         string `json:"created_time"`
-	Updated         string `json:"updated_time"`
-}
-
-func (c Campaign) UTM() string {
-	utm := getParenWrappedSovrnID(c.ID)
-	if utm == "" {
-		if spaced := strings.Split(c.Name, " "); len(spaced) > 1 && util.IsNumber(spaced[0]) {
-			utm = spaced[0]
-		} else if scored := strings.Split(c.Name, "_"); len(scored) > 1 && util.IsNumber(scored[0]) {
-			utm = scored[0]
-		} else {
-			utm = c.ID
-		}
-	}
-	return utm
-}
-
-func getParenWrappedSovrnID(s string) string {
-	if chunks := strings.Split(s, "("); len(chunks) > 1 {
-		chunk := chunks[1]
-		chunks = strings.Split(chunk, ")")
-		if len(chunks) > 1 {
-			return chunks[0]
-		}
-	}
-	return ""
 }
 
 func Get(url string) (data []interface{}, err error) {
@@ -102,18 +56,18 @@ func getAttempt(url string, attempt int) (data []interface{}, err error) {
 		return
 	}
 
-	var payload fb.Payload
-	if err = json.Unmarshal(body, &payload); err != nil {
+	var p payload
+	if err = json.Unmarshal(body, &p); err != nil {
 		log.WithError(err).Error()
 		return
 	}
 
-	if data = append(data, payload.Data...); payload.Page.Next == "" {
+	if data = append(data, p.Data...); p.Page.Next == "" {
 		return
 	}
 
 	var next []interface{}
-	if next, err = Get(payload.Page.Next); err != nil {
+	if next, err = Get(p.Page.Next); err != nil {
 		log.WithError(err).Error()
 		return
 	}
