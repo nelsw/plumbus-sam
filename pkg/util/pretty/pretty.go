@@ -1,6 +1,10 @@
 package pretty
 
-import "github.com/leekchan/accounting"
+import (
+	"encoding/json"
+	"fmt"
+	"github.com/leekchan/accounting"
+)
 
 const (
 	datetimeLayout = "2006-01-02 15:04:05"
@@ -18,18 +22,27 @@ var (
 	pct = accounting.Accounting{Symbol: "%", Precision: 2, Format: "%v%s"}
 )
 
-func FormatUSD(v interface{}) string {
+func USD(v interface{}) string {
 	return usd.FormatMoney(v)
 }
 
-func FormatPercentage(v interface{}) string {
+func Percent(v interface{}) string {
 	return pct.FormatMoney(v)
 }
 
-func FormatInt(v interface{}) string {
+func Int(v interface{}) string {
 	return num.FormatMoney(v)
 }
 
-func FormatDecimal(v interface{}) string {
+func Decimal(v interface{}) string {
 	return dec.FormatMoney(v)
+}
+
+func Json(v interface{}) string {
+	b, _ := json.MarshalIndent(v, "", "    ")
+	return string(b)
+}
+
+func PrintJson(v interface{}) {
+	fmt.Println(Json(v))
 }

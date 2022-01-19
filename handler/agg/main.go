@@ -28,8 +28,8 @@ import (
 	"plumbus/pkg/model/sovrn"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/sam"
-	"plumbus/pkg/util"
 	"plumbus/pkg/util/logs"
+	"plumbus/pkg/util/nums"
 	"strconv"
 	"strings"
 	"sync"
@@ -127,11 +127,11 @@ func (c campaign) utm() string {
 		}
 	}
 
-	if spaced := strings.Split(c.Name, " "); len(spaced) > 1 && util.IsNumber(spaced[0]) {
+	if spaced := strings.Split(c.Name, " "); len(spaced) > 1 && nums.IsNumber(spaced[0]) {
 		return spaced[0]
 	}
 
-	if scored := strings.Split(c.Name, "_"); len(scored) > 1 && util.IsNumber(scored[0]) {
+	if scored := strings.Split(c.Name, "_"); len(scored) > 1 && nums.IsNumber(scored[0]) {
 		return scored[0]
 	}
 

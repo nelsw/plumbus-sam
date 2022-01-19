@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/aws/aws-lambda-go/events"
 	"net/http"
-	"plumbus/pkg/util"
 	"testing"
 )
 
@@ -55,8 +54,6 @@ func TestGetRoot(t *testing.T) {
 func TestGetAccounts(t *testing.T) {
 	if res, _ := handle(ctx, newRequest(http.MethodGet, accountParam)); res.StatusCode != http.StatusOK {
 		t.Error(res.StatusCode, res.Body)
-	} else {
-		util.PrettyPrint(res.Body)
 	}
 }
 
