@@ -2,6 +2,7 @@ package sam
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/config"
 	faas "github.com/aws/aws-sdk-go-v2/service/lambda"
@@ -30,6 +31,12 @@ func NewRequest(method string, params map[string]string) events.APIGatewayV2HTTP
 			},
 		},
 	}
+}
+
+func NewRequestBytes(method string, params map[string]string) (out []byte) {
+	req := NewRequest(method, params)
+	out, _ = json.Marshal(&req)
+	return
 }
 
 func NewEvent(ctx context.Context, name string, data []byte) (out *faas.InvokeOutput, err error) {

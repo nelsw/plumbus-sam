@@ -53,20 +53,3 @@ func abbreviatedWorker(code int, body string) (events.APIGatewayV2HTTPResponse, 
 	log.WithFields(log.Fields{"code": code, "body (len)": len(body)}).Info()
 	return events.APIGatewayV2HTTPResponse{Headers: headers, StatusCode: code, Body: body}, nil
 }
-
-func NewRequestBytes(method string, params map[string]string) (out []byte) {
-	req := NewRequest(method, params)
-	out, _ = json.Marshal(&req)
-	return
-}
-
-func NewRequest(method string, params map[string]string) events.APIGatewayV2HTTPRequest {
-	return events.APIGatewayV2HTTPRequest{
-		QueryStringParameters: params,
-		RequestContext: events.APIGatewayV2HTTPRequestContext{
-			HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{
-				Method: method,
-			},
-		},
-	}
-}
