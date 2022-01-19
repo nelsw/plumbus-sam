@@ -23,6 +23,11 @@ func Nada() (events.APIGatewayV2HTTPResponse, error) {
 	return Err(errors.New("nothing handled"))
 }
 
+func JSON(v interface{}) (events.APIGatewayV2HTTPResponse, error) {
+	data, _ := json.Marshal(&v)
+	return Data(data)
+}
+
 func Data(data []byte) (events.APIGatewayV2HTTPResponse, error) {
 	return OK(string(data))
 }
