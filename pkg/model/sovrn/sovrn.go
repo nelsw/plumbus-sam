@@ -110,7 +110,7 @@ func Process(ctx context.Context, request events.APIGatewayV2HTTPRequest) (err e
 		}
 	}
 
-	if err = repo.BatchWriteItems(ctx, table, rr); err != nil {
+	if err = repo.BatchWrite(ctx, table, rr); err != nil {
 		log.WithError(err).Error("sovrn value batch write items")
 	} else {
 		log.WithFields(log.Fields{"size": len(rr)}).Trace("sovrn value batch write items")

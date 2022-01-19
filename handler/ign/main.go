@@ -88,7 +88,7 @@ func del(ctx context.Context, id string) (events.APIGatewayV2HTTPResponse, error
 		},
 	}
 
-	if err := repo.DeleteItem(ctx, in); err != nil {
+	if err := repo.Delete(ctx, in); err != nil {
 		return api.Err(err)
 	}
 

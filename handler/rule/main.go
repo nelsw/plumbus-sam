@@ -144,7 +144,7 @@ func handleDelete(ctx context.Context, id string) (events.APIGatewayV2HTTPRespon
 		},
 	}
 
-	if err := repo.DeleteItem(ctx, in); err != nil {
+	if err := repo.Delete(ctx, in); err != nil {
 		return api.Err(err)
 	}
 

@@ -267,7 +267,7 @@ func putAccountValuesResponse(ctx context.Context) (events.APIGatewayV2HTTPRespo
 			}
 		}
 
-		if err := repo.BatchWriteItems(ctx, accountTable, ww); err != nil {
+		if err := repo.BatchWrite(ctx, accountTable, ww); err != nil {
 			log.WithError(err).Error("agg account value batch write items")
 			return api.Err(err)
 		}
@@ -391,7 +391,7 @@ func saveCampaigns(ctx context.Context, cc []campaign) {
 		}
 	}
 
-	if err := repo.BatchWriteItems(ctx, campaignTable, rr); err != nil {
+	if err := repo.BatchWrite(ctx, campaignTable, rr); err != nil {
 		log.WithError(err).Error()
 	}
 }
@@ -405,7 +405,7 @@ func batchGet(ctx context.Context, keys []map[string]types.AttributeValue) (got 
 		},
 	}
 	var out *dynamodb.BatchGetItemOutput
-	if out, err = repo.BatchGetItem(ctx, in); err != nil {
+	if out, err = repo.BatchGet(ctx, in); err != nil {
 		log.WithError(err).Error()
 	} else if err = attributevalue.UnmarshalListOfMaps(out.Responses["plumbus_fb_sovrn"], &got); err != nil {
 		log.WithError(err).Error()
@@ -496,7 +496,7 @@ func addRevenue(ctx context.Context, cc []campaign, ii []insight) {
 
 	wg.Wait()
 
-	if err := repo.BatchWriteItems(ctx, campaignTable, rr); err != nil {
+	if err := repo.BatchWrite(ctx, campaignTable, rr); err != nil {
 		log.WithError(err).Error()
 	}
 }

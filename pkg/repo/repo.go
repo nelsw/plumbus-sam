@@ -47,7 +47,7 @@ func Get(ctx context.Context, table, key, val string, v interface{}) error {
 	}
 }
 
-func DeleteItem(ctx context.Context, in *dynamodb.DeleteItemInput) (err error) {
+func Delete(ctx context.Context, in *dynamodb.DeleteItemInput) (err error) {
 	_, err = db.DeleteItem(ctx, in)
 	return
 }
@@ -69,7 +69,7 @@ func Update(ctx context.Context, in *dynamodb.UpdateItemInput) (*dynamodb.Update
 	return db.UpdateItem(ctx, in)
 }
 
-func BatchWriteItems(ctx context.Context, table string, rr []types.WriteRequest) error {
+func BatchWrite(ctx context.Context, table string, rr []types.WriteRequest) error {
 
 	var ee []error
 
@@ -97,7 +97,7 @@ func BatchWriteItems(ctx context.Context, table string, rr []types.WriteRequest)
 	return errors.New(strings.Join(ss, "\n"))
 }
 
-func BatchGetItem(ctx context.Context, in *dynamodb.BatchGetItemInput) (*dynamodb.BatchGetItemOutput, error) {
+func BatchGet(ctx context.Context, in *dynamodb.BatchGetItemInput) (*dynamodb.BatchGetItemOutput, error) {
 	return db.BatchGetItem(ctx, in)
 }
 
