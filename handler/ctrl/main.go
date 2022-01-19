@@ -11,13 +11,10 @@ import (
 	log "github.com/sirupsen/logrus"
 	"net/http"
 	"plumbus/pkg/api"
+	"plumbus/pkg/model/campaign"
 	"plumbus/pkg/model/fb"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/util/logs"
-)
-
-var (
-	campaignTable = "plumbus_fb_campaign"
 )
 
 func init() {
@@ -37,13 +34,13 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 		accountID := req.QueryStringParameters["account_id"]
 		campaignID := req.QueryStringParameters["campaign_id"]
 		status := req.QueryStringParameters["status"]
-		return put(ctx, accountID, campaignID, fb.CampaignStatus(status))
+		return put(ctx, accountID, campaignID, campaign.Status(status))
 	}
 
 	return api.K()
 }
 
-func put(ctx context.Context, accountID, campaignID string, status fb.CampaignStatus) (events.APIGatewayV2HTTPResponse, error) {
+func put(ctx context.Context, accountID, campaignID string, status campaign.Status) (events.APIGatewayV2HTTPResponse, error) {
 
 	if campaignID != "" {
 		if err := fb.UpdateCampaignStatus(campaignID, status); err != nil {
@@ -70,10 +67,10 @@ func put(ctx context.Context, accountID, campaignID string, status fb.CampaignSt
 	return api.K()
 }
 
-func updateCampaignStatus(ctx context.Context, accountID, campaignID string, status fb.CampaignStatus) (err error) {
+func updateCampaignStatus(ctx context.Context, accountID, campaignID string, status campaign.Status) (err error) {
 
 	in := &dynamodb.UpdateItemInput{
-		TableName: &campaignTable,
+		TableName: campaign.TableName(),
 		Key: map[string]types.AttributeValue{
 			"AccountID": &types.AttributeValueMemberS{
 				Value: accountID,
@@ -95,15 +92,10 @@ func updateCampaignStatus(ctx context.Context, accountID, campaignID string, sta
 
 }
 
-type campaign struct {
-	AccountID string `json:"account_id"`
-	ID        string `json:"id"`
-}
-
-func getCampaigns(ctx context.Context, accountID string) (cc []campaign, err error) {
+func getCampaigns(ctx context.Context, accountID string) (cc []campaign.Entity, err error) {
 
 	in := &dynamodb.QueryInput{
-		TableName:              &campaignTable,
+		TableName:              campaign.TableName(),
 		KeyConditionExpression: ptr.String("AccountID = :v1"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":v1": &types.AttributeValueMemberS{Value: accountID},
