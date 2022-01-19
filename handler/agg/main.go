@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"plumbus/pkg/api"
 	"plumbus/pkg/model/fb"
+	"plumbus/pkg/model/rule"
 	"plumbus/pkg/model/sovrn"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/sam"
@@ -220,7 +221,7 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 }
 
 func postRoot(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
-	data := api.NewRequestBytes(http.MethodPost, map[string]string{"node": "account"})
+	data := sam.NewRequestBytes(http.MethodPost, map[string]string{"node": "account"})
 	if _, err := sam.NewEvent(ctx, handlerName, data); err != nil {
 		return api.Err(err)
 	}
@@ -231,7 +232,7 @@ func postAccounts(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) 
 	if res, _ := putAccountValuesResponse(ctx); res.StatusCode != http.StatusOK {
 		return res, nil
 	}
-	data := api.NewRequestBytes(http.MethodPost, map[string]string{"node": "campaign"})
+	data := sam.NewRequestBytes(http.MethodPost, map[string]string{"node": "campaign"})
 	if _, err := sam.NewEvent(ctx, handlerName, data); err != nil {
 		return api.Err(err)
 	}
@@ -242,8 +243,8 @@ func postCampaigns(ctx context.Context) (events.APIGatewayV2HTTPResponse, error)
 	if res, _ := putCampaignDetailValuesResponse(ctx); res.StatusCode != http.StatusOK {
 		return res, nil
 	}
-	data := api.NewRequestBytes(http.MethodPost, nil)
-	if _, err := sam.NewEvent(ctx, "plumbus_ruleHandler", data); err != nil {
+	data := sam.NewRequestBytes(http.MethodPost, map[string]string{"node": "all"})
+	if _, err := sam.NewEvent(ctx, rule.Handler(), data); err != nil {
 		return api.Err(err)
 	}
 	return api.K()
