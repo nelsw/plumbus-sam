@@ -4,62 +4,26 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	faas "github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"net/http"
 	"plumbus/pkg/api"
+	"plumbus/pkg/model/campaign"
+	"plumbus/pkg/model/fb"
+	"plumbus/pkg/model/rule"
 	"plumbus/pkg/repo"
+	"plumbus/pkg/sam"
 	"plumbus/pkg/util/logs"
+	"strings"
+	"sync"
 	"time"
 )
-
-var (
-	table     = "plumbus_fb_rule"
-	scanInput = dynamodb.ScanInput{TableName: &table}
-)
-
-type Rule struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Status      bool        `json:"status"` // on / off
-	Conditions  []Condition `json:"conditions"`
-	Action      bool        `json:"action"` // enable / disable
-	Created     time.Time   `json:"created"`
-	Updated     time.Time   `json:"updated"`
-	AccountIDS  []string    `json:"account_ids"`
-	CampaignIDS []string    `json:"campaign_ids"`
-
-	Scope []string `json:"scope"` // deprecated
-}
-
-type Target string
-
-const (
-	targetROI   = "ROI"
-	targetSpend = "SPEND"
-)
-
-type Operator string
-
-const (
-	operatorGT = ">"
-	operatorLT = "<"
-)
-
-type Condition struct {
-	ID       string    `json:"id"`
-	Target   Target    `json:"target"`   // roi % / $ spend
-	Operator Operator  `json:"operator"` // gt, lt
-	Value    float64   `json:"value"`    // roi % / $ spend
-	Created  time.Time `json:"created"`
-	Updated  time.Time `json:"updated"`
-}
 
 func init() {
 	logs.Init()
@@ -75,68 +39,62 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 		return api.K()
 
 	case http.MethodGet:
-		return handleGet(ctx)
+		return get(ctx)
 
 	case http.MethodPut:
-		return handlePut(ctx, []byte(req.Body))
+		return put(ctx, req.Body)
 
 	case http.MethodDelete:
-		return handleDelete(ctx, req.QueryStringParameters["id"])
+		return del(ctx, req.QueryStringParameters["id"])
 
 	case http.MethodPost:
-		return handlePost(ctx)
+		if _, ok := req.QueryStringParameters["all"]; ok {
+			return postAll(ctx)
+		} else {
+			return postOne(ctx, req.Body)
+		}
 
 	default:
-		return api.Err(errors.New("nothing handled"))
+		return api.Nada()
 	}
 }
 
-func handleGet(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
+func get(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 
-	var out []Rule
-	if err := repo.Scan(ctx, &scanInput, &out); err != nil {
+	var out []rule.Entity
+	if err := repo.Scan(ctx, &dynamodb.ScanInput{TableName: rule.TableName()}, &out); err != nil {
 		return api.Err(err)
 	}
 
-	var data []byte
-	data, _ = json.Marshal(out)
-	return api.OK(string(data))
+	return api.JSON(out)
 }
 
-func handlePut(ctx context.Context, data []byte) (events.APIGatewayV2HTTPResponse, error) {
+func put(ctx context.Context, body string) (events.APIGatewayV2HTTPResponse, error) {
 
-	var rule Rule
-	if err := json.Unmarshal(data, &rule); err != nil {
+	var e rule.Entity
+	if err := json.Unmarshal([]byte(body), &e); err != nil {
 		return api.Err(err)
 	}
 
 	now := time.Now().UTC()
-	if rule.Updated = now; rule.ID == "" {
-		rule.ID = uuid.NewString()
-		rule.Created = now
+	if e.Updated = now; e.ID == "" {
+		e.ID = uuid.NewString()
+		e.Created = now
 	}
 
-	for index, condition := range rule.Conditions {
-		if rule.Conditions[index].Updated = now; condition.ID == "" {
-			rule.Conditions[index].ID = uuid.NewString()
-			rule.Conditions[index].Created = now
-		}
-	}
-
-	if item, err := attributevalue.MarshalMap(&rule); err != nil {
+	if item, err := attributevalue.MarshalMap(&e); err != nil {
 		return api.Err(err)
-	} else if err = repo.Put(ctx, &dynamodb.PutItemInput{Item: item, TableName: &table}); err != nil {
+	} else if err = repo.Put(ctx, &dynamodb.PutItemInput{Item: item, TableName: rule.TableName()}); err != nil {
 		return api.Err(err)
 	} else {
-		bytes, _ := json.Marshal(&rule)
-		return api.OK(string(bytes))
+		return api.JSON(e)
 	}
 }
 
-func handleDelete(ctx context.Context, id string) (events.APIGatewayV2HTTPResponse, error) {
+func del(ctx context.Context, id string) (events.APIGatewayV2HTTPResponse, error) {
 
 	in := &dynamodb.DeleteItemInput{
-		TableName: &table,
+		TableName: rule.TableName(),
 		Key: map[string]types.AttributeValue{
 			"ID": &types.AttributeValueMemberS{
 				Value: id,
@@ -148,12 +106,117 @@ func handleDelete(ctx context.Context, id string) (events.APIGatewayV2HTTPRespon
 		return api.Err(err)
 	}
 
-	return api.OK("")
+	return api.K()
 }
 
-func handlePost(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
-	fmt.Println("not yet running") // todo - assess
-	return api.OK("")
+func postAll(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
+
+	var ee []rule.Entity
+	if err := repo.Scan(ctx, &dynamodb.ScanInput{TableName: rule.TableName()}, &ee); err != nil {
+		return api.Err(err)
+	}
+
+	var wg sync.WaitGroup
+	for _, e := range ee {
+
+		if err := post(ctx, e); err != nil {
+			return api.Err(err)
+		}
+	}
+
+	wg.Wait()
+
+	return api.K()
+}
+
+func postOne(ctx context.Context, body string) (events.APIGatewayV2HTTPResponse, error) {
+	var e rule.Entity
+	if err := json.Unmarshal([]byte(body), &e); err != nil {
+		return api.Err(err)
+	} else if err := post(ctx, e); err != nil {
+		return api.Err(err)
+	} else {
+		return api.K()
+	}
+}
+
+func post(ctx context.Context, r rule.Entity) error {
+
+	var all []campaign.Entity
+	for id, ids := range r.Nodes {
+
+		params := map[string]string{"accountID": id}
+		if len(ids) > 0 {
+			params["campaignIDS"] = strings.Join(ids, ",")
+		}
+
+		var err error
+		var out *faas.InvokeOutput
+		if out, err = sam.NewReqRes(ctx, campaign.Handler(), sam.NewRequestBytes(http.MethodGet, params)); err != nil {
+			return err
+		}
+
+		var res events.APIGatewayV2HTTPResponse
+		if _ = json.Unmarshal(out.Payload, &res); res.StatusCode != http.StatusOK {
+			return errors.New(res.Body)
+		}
+
+		var cc []campaign.Entity
+		if err = json.Unmarshal([]byte(res.Body), &cc); err != nil {
+			return err
+		}
+
+		all = append(all, cc...)
+	}
+
+	for _, c := range all {
+		eval(ctx, r, c)
+	}
+	return nil
+}
+
+func eval(ctx context.Context, r rule.Entity, c campaign.Entity) {
+
+	if string(r.Effect) == c.Circ {
+		log.Trace("rule effect == campaign status")
+		return
+	}
+
+	for _, condition := range r.Conditions {
+
+		if condition.LHS == rule.Spend && condition.Met(c.Spent()) {
+			log.Trace("spend met: ", c.ID)
+			continue
+		}
+
+		if condition.LHS == rule.Profit && condition.Met(c.Profit) {
+			log.Trace("profit met: ", c.ID)
+			continue
+		}
+
+		if condition.LHS == rule.ROI && condition.Met(c.ROI) {
+			log.Trace("roi met: ", c.ID)
+			continue
+		}
+
+		log.Trace("nothing met: ", c.ID)
+		return
+	}
+
+	var err error
+	var out *faas.InvokeOutput
+
+	params := map[string]string{
+		"node":   "campaign",
+		"id":     c.ID,
+		"status": string(r.Effect),
+	}
+	data, _ := json.Marshal(params)
+	if out, err = sam.NewEvent(ctx, fb.Handler(), data); err != nil {
+		log.WithError(err).
+			WithFields(log.Fields{"code": out.StatusCode, "payload": string(out.Payload)}).
+			Error("while sending an update status event to fb handler")
+	}
 }
 
 func main() {
