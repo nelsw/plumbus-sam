@@ -1,3 +1,5 @@
+// Package repo provides common db functionality.
+// DynamoDB reserved keywords: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/ReservedWords.html
 package repo
 
 import (
@@ -7,7 +9,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"log"
+	log "github.com/sirupsen/logrus"
+	"plumbus/pkg/util/logs"
 	"strings"
 )
 
@@ -16,8 +19,9 @@ const maxRequestSize = 25 // you can afford more than this jeff
 var db *dynamodb.Client
 
 func init() {
+	logs.Init()
 	if cfg, err := config.LoadDefaultConfig(context.Background()); err != nil {
-		log.Panic(err)
+		log.WithError(err).Fatal()
 	} else {
 		db = dynamodb.NewFromConfig(cfg)
 	}
