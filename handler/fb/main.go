@@ -41,9 +41,21 @@ func handle(ctx context.Context, req map[string]interface{}) (interface{}, error
 	switch req["node"] {
 	case "account":
 		return accounts()
+	case "campaign":
+		if v, ok := req["status"]; ok {
+			return nil, updateCampaignStatus(req["id"].(string), v.(string))
+		}
+		fallthrough
 	default:
 		return nil, errors.New("bad request")
 	}
+}
+
+func updateCampaignStatus(id, status string) (err error) {
+	if _, err = http.Post(api+"/"+id+token()+status, formContentType, nil); err != nil {
+		log.WithError(err).Error()
+	}
+	return
 }
 
 func accounts() (out []account.Entity, err error) {

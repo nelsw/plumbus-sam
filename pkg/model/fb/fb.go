@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"plumbus/pkg/model/campaign"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/util/logs"
 	"strings"
@@ -18,39 +19,12 @@ import (
 const (
 	api             = "https://graph.facebook.com/v12.0"
 	formContentType = "application/x-www-form-urlencoded"
+	handler         = "plumbus_campaignHandler"
 )
 
-type CampaignStatus string
-
-const (
-	ActiveCampaign   CampaignStatus = "ACTIVE"
-	PausedCampaign   CampaignStatus = "PAUSED"
-	DeletedCampaign  CampaignStatus = "DELETED"
-	ArchivedCampaign CampaignStatus = "ARCHIVED"
-)
-
-func (s CampaignStatus) Status() string {
-	return "&status=" + string(s)
+func Handler() string {
+	return handler
 }
-
-func (s CampaignStatus) String() string {
-	return string(s)
-}
-
-var (
-	accountStatuses = map[int]string{
-		1:   "Active",
-		2:   "Disabled",
-		3:   "Unsettled",
-		7:   "PendingRiskReview",
-		8:   "PendingSettlement",
-		9:   "InGracePeriod",
-		100: "PendingClosure",
-		101: "Closed",
-		201: "AnyActive",
-		202: "AnyClosed",
-	}
-)
 
 type payload struct {
 	Data []interface{} `json:"data"`
@@ -67,7 +41,7 @@ func Get(url string) (data []interface{}, err error) {
 	return getAttempt(url, 1)
 }
 
-func UpdateCampaignStatus(id string, s CampaignStatus) (err error) {
+func UpdateCampaignStatus(id string, s campaign.Status) (err error) {
 	if _, err = http.Post(api+"/"+id+Token()+s.Status(), formContentType, nil); err != nil {
 		log.WithError(err).Error()
 	}
