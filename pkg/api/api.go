@@ -23,6 +23,10 @@ func Nada() (events.APIGatewayV2HTTPResponse, error) {
 	return Err(errors.New("nothing handled"))
 }
 
+func Data(data []byte) (events.APIGatewayV2HTTPResponse, error) {
+	return OK(string(data))
+}
+
 func OK(body string) (events.APIGatewayV2HTTPResponse, error) {
 	return worker(http.StatusOK, body)
 }
