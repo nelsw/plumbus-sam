@@ -103,7 +103,7 @@ func put(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 		}
 	}
 
-	return api.Data(out.Payload)
+	return get(ctx, "all")
 }
 
 // patch will toggle account inclusion.
