@@ -27,6 +27,26 @@ func init() {
 	}
 }
 
+func Get(ctx context.Context, table, key, val string, v interface{}) error {
+
+	input := &dynamodb.GetItemInput{
+		TableName: &table,
+		Key: map[string]types.AttributeValue{
+			key: &types.AttributeValueMemberS{
+				Value: val,
+			},
+		},
+	}
+
+	if output, err := db.GetItem(ctx, input); err != nil {
+		return err
+	} else if err = attributevalue.UnmarshalMap(output.Item, &v); err != nil {
+		return err
+	} else {
+		return nil
+	}
+}
+
 func DeleteItem(ctx context.Context, in *dynamodb.DeleteItemInput) (err error) {
 	_, err = db.DeleteItem(ctx, in)
 	return
