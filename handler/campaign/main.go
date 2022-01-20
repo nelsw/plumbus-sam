@@ -1,10 +1,9 @@
-// Package provides functionality for updating and return account entity data.
+// Package provides functionality for updating and return campaign entity data on Facebook and the system database.
 package main
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -36,24 +35,15 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 		return api.K()
 
 	case http.MethodGet:
-		if accountID, ok := req.QueryStringParameters["accountID"]; !ok {
-			return api.Err(errors.New("missing accountID"))
-		} else if campaignIDS, ok := req.QueryStringParameters["campaignIDS"]; !ok {
-			return query(ctx, accountID)
+		accountID := req.QueryStringParameters["accountID"]
+		if campaignIDS, ok := req.QueryStringParameters["campaignIDS"]; ok {
+			return get(ctx, accountID, campaignIDS)
 		} else {
-			return get(ctx, accountID, strings.Split(campaignIDS, ","))
+			return query(ctx, accountID)
 		}
 
 	case http.MethodPatch:
-		if accountID, ok := req.QueryStringParameters["accountID"]; !ok {
-			return api.Err(errors.New("missing accountID"))
-		} else if campaignID, ok := req.QueryStringParameters["campaignID"]; !ok {
-			return api.Err(errors.New("missing campaignID"))
-		} else if status, ok := req.QueryStringParameters["status"]; !ok {
-			return api.Err(errors.New("missing status"))
-		} else {
-			return patch(ctx, accountID, campaignID, status)
-		}
+		return patch(ctx, req)
 
 	default:
 		return api.Nada()
@@ -61,11 +51,59 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 
 }
 
-func patch(ctx context.Context, accountID, campaignID, status string) (events.APIGatewayV2HTTPResponse, error) {
-	data, _ := json.Marshal(map[string]interface{}{"node": "campaign", "id": campaignID, "status": status})
-	if _, err := sam.NewReqRes(ctx, fb.Handler(), data); err != nil {
+func patch(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+
+	status := campaign.Status(req.QueryStringParameters["status"])
+	accountID := req.QueryStringParameters["accountID"]
+	ID := req.QueryStringParameters["ID"]
+
+	if ID != "" {
+		if err := update(ctx, accountID, ID, status); err != nil {
+			return api.Err(err)
+		}
+		return api.K()
+	}
+
+	in := &dynamodb.QueryInput{
+		TableName:              campaign.TableName(),
+		KeyConditionExpression: ptr.String("AccountID = :v1"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":v1": &types.AttributeValueMemberS{
+				Value: accountID,
+			},
+		},
+	}
+
+	var cc []campaign.Entity
+	if out, err := repo.Query(ctx, in); err != nil {
+		return api.Err(err)
+	} else if err = attributevalue.UnmarshalListOfMaps(out.Items, &cc); err != nil {
 		return api.Err(err)
 	}
+
+	for _, c := range cc {
+		if err := update(ctx, accountID, c.ID, status); err != nil {
+			return api.Err(err)
+		}
+	}
+
+	return api.K()
+}
+
+func update(ctx context.Context, accountID, ID string, status campaign.Status) (err error) {
+
+	param := map[string]interface{}{
+		"node":   "campaign",
+		"ID":     ID,
+		"status": status,
+	}
+
+	data, _ := json.Marshal(param)
+	if _, err = sam.NewReqRes(ctx, fb.Handler(), data); err != nil {
+		log.WithError(err).Error()
+		return
+	}
+
 	in := &dynamodb.UpdateItemInput{
 		TableName: campaign.TableName(),
 		Key: map[string]types.AttributeValue{
@@ -73,30 +111,30 @@ func patch(ctx context.Context, accountID, campaignID, status string) (events.AP
 				Value: accountID,
 			},
 			"ID": &types.AttributeValueMemberS{
-				Value: campaignID,
+				Value: ID,
 			},
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":v1": &types.AttributeValueMemberS{
-				Value: status,
+				Value: status.String(),
 			},
 		},
 		UpdateExpression: ptr.String("set Circ = :v1"),
 	}
 
-	if _, err := repo.Update(ctx, in); err != nil {
-		return api.Err(err)
+	if _, err = repo.Update(ctx, in); err != nil {
+		log.WithError(err).Error()
 	}
 
-	return api.K()
+	return
 }
 
 // get queries the db for all campaigns where the given parameters equal the key expression attribute values.
-func get(ctx context.Context, accountID string, campaignIDS []string) (events.APIGatewayV2HTTPResponse, error) {
+func get(ctx context.Context, accountID string, campaignIDS string) (events.APIGatewayV2HTTPResponse, error) {
 
 	var keys []map[string]types.AttributeValue
 
-	for _, id := range campaignIDS {
+	for _, id := range strings.Split(campaignIDS, ",") {
 		key := map[string]types.AttributeValue{
 			"AccountID": &types.AttributeValueMemberS{
 				Value: accountID,
