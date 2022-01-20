@@ -118,10 +118,14 @@ func postAll(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 
 	var wg sync.WaitGroup
 	for _, e := range ee {
-
-		if err := post(ctx, e); err != nil {
-			return api.Err(err)
-		}
+		wg.Add(1)
+		go func(e rule.Entity) {
+			defer wg.Done()
+			if err := post(ctx, e); err != nil {
+				log.WithError(err).Error()
+				return
+			}
+		}(e)
 	}
 
 	wg.Wait()
