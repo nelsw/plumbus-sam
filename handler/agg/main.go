@@ -243,7 +243,7 @@ func postCampaigns(ctx context.Context) (events.APIGatewayV2HTTPResponse, error)
 	if res, _ := putCampaignDetailValuesResponse(ctx); res.StatusCode != http.StatusOK {
 		return res, nil
 	}
-	data := sam.NewRequestBytes(http.MethodPost, map[string]string{"node": "all"})
+	data := sam.NewRequestBytes(http.MethodPost, map[string]string{"all": "all"})
 	if _, err := sam.NewEvent(ctx, rule.Handler(), data); err != nil {
 		return api.Err(err)
 	}
