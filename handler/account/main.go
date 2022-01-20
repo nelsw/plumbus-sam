@@ -15,10 +15,19 @@ import (
 	"net/http"
 	"plumbus/pkg/api"
 	"plumbus/pkg/model/account"
+	"plumbus/pkg/model/campaign"
 	"plumbus/pkg/model/fb"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/sam"
 	"plumbus/pkg/util/logs"
+	"plumbus/pkg/util/pretty"
+	"regexp"
+	"sync"
+)
+
+var (
+	posRegexp = regexp.MustCompile(`all|in|ex|fam`)
+	mutex     = sync.Mutex{}
 )
 
 func init() {
@@ -52,7 +61,7 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 // get scans the db for all accounts where the included value is true, false, or either.
 func get(ctx context.Context, pos string) (events.APIGatewayV2HTTPResponse, error) {
 
-	if pos != "all" && pos != "in" && pos != "ex" {
+	if !posRegexp.MatchString(pos) {
 		return api.Err(errors.New("unknown pos: " + pos))
 	}
 
@@ -60,16 +69,64 @@ func get(ctx context.Context, pos string) (events.APIGatewayV2HTTPResponse, erro
 	if pos != "all" {
 		in.FilterExpression = ptr.String("Included = :v1")
 		in.ExpressionAttributeValues = map[string]types.AttributeValue{
-			":v1": &types.AttributeValueMemberBOOL{Value: pos == "in"},
+			":v1": &types.AttributeValueMemberBOOL{Value: pos != "ex"},
 		}
 	}
 
-	var out []account.Entity
-	if err := repo.Scan(ctx, &in, &out); err != nil {
+	var aa []account.Entity
+	if err := repo.Scan(ctx, &in, &aa); err != nil {
 		return api.Err(err)
 	}
 
-	return api.JSON(out)
+	var wg sync.WaitGroup
+
+	for i, a := range aa {
+
+		wg.Add(1)
+
+		go func(i int, a account.Entity) {
+
+			defer wg.Done()
+
+			var err error
+			var out *faas.InvokeOutput
+
+			data := sam.NewRequestBytes(http.MethodGet, map[string]string{"accountID": a.ID})
+			if out, err = sam.NewReqRes(ctx, campaign.Handler(), data); err != nil {
+				log.WithError(err).Error()
+				return
+			}
+
+			var res events.APIGatewayV2HTTPResponse
+			if err = json.Unmarshal(out.Payload, &res); err != nil {
+				log.WithError(err).Error()
+				return
+			}
+
+			if res.StatusCode == http.StatusNotFound {
+				return
+			}
+
+			if res.StatusCode != http.StatusOK {
+				log.WithError(err).Error()
+				return
+			}
+
+			var cc []campaign.Entity
+			if err = json.Unmarshal([]byte(res.Body), &cc); err != nil {
+				log.WithError(err).Error()
+				return
+			}
+
+			aa[i].Campaigns = cc
+		}(i, a)
+	}
+
+	wg.Wait()
+
+	pretty.PrintJson(aa)
+
+	return api.JSON(aa)
 }
 
 // put requests all accounts from the FB handler and reconciles them with the db before returning given results.
