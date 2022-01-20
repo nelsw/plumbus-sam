@@ -2,6 +2,7 @@ package rule
 
 import (
 	"github.com/google/uuid"
+	"plumbus/pkg/model/campaign"
 	"time"
 )
 
@@ -19,13 +20,6 @@ func Handler() string {
 	return handler
 }
 
-type Effect string
-
-const (
-	Active Effect = "ACTIVE"
-	Paused        = "PAUSED"
-)
-
 type Entity struct {
 
 	// ID is the unique identifier and partition key.
@@ -41,7 +35,7 @@ type Entity struct {
 	Conditions []Condition `json:"conditions"`
 
 	// Effect is the outcome of satisfactory rules on Ads.
-	Effect Effect `json:"effect"`
+	Effect campaign.Status `json:"effect"`
 
 	// Nodes are a graph of Campaign ID's mapped by an Account ID.
 	Nodes map[string][]string `json:"scope"`
