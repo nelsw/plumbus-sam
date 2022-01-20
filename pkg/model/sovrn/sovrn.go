@@ -1,5 +1,11 @@
 package sovrn
 
+var table = "plumbus_fb_sovrn"
+
+func Table() string {
+	return table
+}
+
 type Entity struct {
 	UTM         string  `json:"UTM"`
 	Revenue     float64 `json:"Revenue"`

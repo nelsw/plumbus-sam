@@ -9,7 +9,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"plumbus/pkg/model/campaign"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/util/logs"
 	"strings"
@@ -17,9 +16,8 @@ import (
 )
 
 const (
-	api             = "https://graph.facebook.com/v12.0"
-	formContentType = "application/x-www-form-urlencoded"
-	handler         = "plumbus_campaignHandler"
+	api     = "https://graph.facebook.com/v12.0"
+	handler = "plumbus_fbHandler"
 )
 
 func Handler() string {
@@ -39,13 +37,6 @@ func init() {
 
 func Get(url string) (data []interface{}, err error) {
 	return getAttempt(url, 1)
-}
-
-func UpdateCampaignStatus(id string, s campaign.Status) (err error) {
-	if _, err = http.Post(api+"/"+id+Token()+s.Param(), formContentType, nil); err != nil {
-		log.WithError(err).Error()
-	}
-	return
 }
 
 func getAttempt(url string, attempt int) (data []interface{}, err error) {

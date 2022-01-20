@@ -212,7 +212,7 @@ func eval(ctx context.Context, r rule.Entity, c campaign.Entity) {
 
 	params := map[string]string{
 		"node":   "campaign",
-		"id":     c.ID,
+		"ID":     c.ID,
 		"status": string(r.Effect),
 	}
 	data, _ := json.Marshal(params)

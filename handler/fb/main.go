@@ -25,8 +25,8 @@ const (
 	api                = "https://graph.facebook.com/v12.0"
 	formContentType    = "application/x-www-form-urlencoded"
 	accountFieldsParam = "fields=account_id,name,account_status,created_time"
-	descFieldsParam    = "fields=account_id,id,name,status,daily_budget,budget_remaining,spend_cap,created_time,updated_time"
-	sightFieldsParam   = "fields=campaign_id,clicks,impressions,spend,cpc,cpp,cpm,ctr"
+	descFieldsParam    = "fields=account_id,id,name,status,daily_budget,budget_remaining,created_time,updated_time"
+	sightFieldsParam   = "fields=account_id,campaign_id,clicks,impressions,spend,cpc,cpp,cpm,ctr"
 	levelParam         = "level=campaign"
 	dateParam          = "date_preset=today"
 )
@@ -63,7 +63,7 @@ func getCampaigns(req map[string]interface{}) (out []campaign.Entity, err error)
 
 	ccc := map[string]campaign.Entity{}
 	for _, c := range cc {
-		ccc[c.ID] = c
+		ccc[c.CampaignID] = c
 	}
 
 	if cc, err = getCampaignDesc(ID); err != nil {
@@ -145,6 +145,7 @@ func getCampaignsSight(ID string) (out []campaign.Entity, err error) {
 
 	if err = json.Unmarshal(data, &out); err != nil {
 		log.WithError(err).Error()
+		return
 	}
 
 	log.Trace("got ", len(out), " campaign insights for AccountID ", ID)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"plumbus/pkg/model/campaign"
 	"strconv"
 	"time"
 )
@@ -37,6 +38,8 @@ type Entity struct {
 
 	// Included is a flag used by Plumbus to determine which accounts should be considered when executing rules.
 	Included bool
+
+	Campaigns []campaign.Entity
 }
 
 func (e *Entity) MarshalJSON() (data []byte, err error) {
@@ -70,7 +73,7 @@ func (e *Entity) MarshalJSON() (data []byte, err error) {
 	var created time.Time
 	created, err = time.Parse("2006-01-02T15:04:05-0700", e.Created)
 
-	return json.Marshal(map[string]interface{}{
+	v := map[string]interface{}{
 		"account_id":     e.ID,
 		"name":           e.Named,
 		"account_status": e.Stated,
@@ -78,7 +81,13 @@ func (e *Entity) MarshalJSON() (data []byte, err error) {
 		"included":       e.Included,
 		"status":         status,
 		"created":        created,
-	})
+	}
+
+	if len(e.Campaigns) > 0 {
+		v["campaigns"] = e.Campaigns
+	}
+
+	return json.Marshal(v)
 }
 
 func (e *Entity) UnmarshalJSON(data []byte) (err error) {
