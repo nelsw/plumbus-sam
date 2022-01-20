@@ -110,10 +110,14 @@ func del(ctx context.Context, id string) (events.APIGatewayV2HTTPResponse, error
 
 func postAll(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 
+	log.Trace("performing rule analysis requested by system")
+
 	var ee []rule.Entity
 	if err := repo.Scan(ctx, &dynamodb.ScanInput{TableName: rule.TableName()}, &ee); err != nil {
 		return api.Err(err)
 	}
+
+	log.Trace("found ", len(ee), " rules to analyze and potentially act upon")
 
 	var wg sync.WaitGroup
 	for _, e := range ee {
@@ -121,7 +125,9 @@ func postAll(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 		go func(e rule.Entity) {
 			defer wg.Done()
 			if err := post(ctx, e); err != nil {
-				log.WithError(err).Error()
+				log.WithError(err).
+					WithFields(log.Fields{"rule": e}).
+					Error("while getting campaigns and/or evaluating campaigns against the given rule")
 				return
 			}
 		}(e)
@@ -129,18 +135,32 @@ func postAll(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 
 	wg.Wait()
 
+	log.Trace("completed rule analysis from user request")
+
 	return api.K()
 }
 
 func postOne(ctx context.Context, body string) (events.APIGatewayV2HTTPResponse, error) {
+
+	log.Trace("performing rule analysis requested by user")
+
 	var e rule.Entity
 	if err := json.Unmarshal([]byte(body), &e); err != nil {
+		log.WithError(err).Error("unable to unmarshal request body into a rule entity")
 		return api.Err(err)
-	} else if err := post(ctx, e); err != nil {
-		return api.Err(err)
-	} else {
-		return api.K()
 	}
+
+	log.WithFields(log.Fields{"rule.Entity": e}).Trace("successfully interpreted request body into a rule entity")
+
+	if err := post(ctx, e); err != nil {
+		log.WithError(err).
+			WithFields(log.Fields{"rule": e}).
+			Error("while getting campaigns and/or evaluating campaigns against the given rule")
+		return api.Err(err)
+	}
+
+	log.Trace("successfully completed rule analysis from user request")
+	return api.K()
 }
 
 func post(ctx context.Context, r rule.Entity) error {
