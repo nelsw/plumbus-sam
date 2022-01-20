@@ -25,7 +25,7 @@ func Nada() (events.APIGatewayV2HTTPResponse, error) {
 
 func JSON(v interface{}) (events.APIGatewayV2HTTPResponse, error) {
 	data, _ := json.Marshal(&v)
-	return Data(data)
+	return OnlyOK(string(data))
 }
 
 func Data(data []byte) (events.APIGatewayV2HTTPResponse, error) {
