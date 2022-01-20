@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"plumbus/pkg/api"
 	"plumbus/pkg/model/account"
+	"plumbus/pkg/model/fb"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/sam"
 	"plumbus/pkg/util/logs"
@@ -77,8 +78,8 @@ func put(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 	var err error
 	var out *faas.InvokeOutput
 
-	data, _ := json.Marshal(map[string]string{"node": "account"})
-	if out, err = sam.NewReqRes(ctx, "plumbus_fbHandler", data); err != nil {
+	data, _ := json.Marshal(map[string]string{"node": "accounts"})
+	if out, err = sam.NewReqRes(ctx, fb.Handler(), data); err != nil {
 		return api.Err(err)
 	}
 

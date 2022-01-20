@@ -6,29 +6,30 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/aws/aws-lambda-go/lambda"
 	log "github.com/sirupsen/logrus"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"plumbus/pkg/model/account"
+	"plumbus/pkg/model/campaign"
+	"plumbus/pkg/model/fb"
 	"plumbus/pkg/util/logs"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
-	api             = "https://graph.facebook.com/v12.0"
-	formContentType = "application/x-www-form-urlencoded"
-	accountFields   = "&fields=account_id,name,account_status,created_time"
+	api                = "https://graph.facebook.com/v12.0"
+	formContentType    = "application/x-www-form-urlencoded"
+	accountFieldsParam = "fields=account_id,name,account_status,created_time"
+	descFieldsParam    = "fields=account_id,id,name,status,daily_budget,budget_remaining,spend_cap,created_time,updated_time"
+	sightFieldsParam   = "fields=campaign_id,clicks,impressions,spend,cpc,cpp,cpm,ctr"
+	levelParam         = "level=campaign"
+	dateParam          = "date_preset=today"
 )
-
-type payload struct {
-	Data []interface{} `json:"data"`
-	Page struct {
-		Next string `json:"next"`
-	} `json:"paging"`
-}
 
 func init() {
 	logs.Init()
@@ -39,28 +40,71 @@ func handle(ctx context.Context, req map[string]interface{}) (interface{}, error
 	log.WithFields(log.Fields{"ctx": ctx, "req": req}).Info()
 
 	switch req["node"] {
-	case "account":
+	case "accounts":
 		return accounts()
 	case "campaign":
-		if v, ok := req["status"]; ok {
-			return nil, updateCampaignStatus(req["id"].(string), v.(string))
-		}
-		fallthrough
+		return postCampaignStatus(req)
+	case "campaigns":
+		return getCampaigns(req)
 	default:
 		return nil, errors.New("bad request")
 	}
 }
 
-func updateCampaignStatus(id, status string) (err error) {
-	if _, err = http.Post(api+"/"+id+token()+status, formContentType, nil); err != nil {
+func getCampaigns(req map[string]interface{}) (out []campaign.Entity, err error) {
+
+	ID := req["ID"].(string)
+
+	var cc []campaign.Entity
+	if cc, err = getCampaignsSight(ID); err != nil {
 		log.WithError(err).Error()
+		return
 	}
+
+	ccc := map[string]campaign.Entity{}
+	for _, c := range cc {
+		ccc[c.ID] = c
+	}
+
+	if cc, err = getCampaignDesc(ID); err != nil {
+		log.WithError(err).Error()
+		return
+	}
+
+	var wg sync.WaitGroup
+
+	for _, c := range cc {
+
+		wg.Add(1)
+
+		go func(c campaign.Entity) {
+
+			defer wg.Done()
+
+			if v, ok := ccc[c.ID]; ok {
+				c.Clicks = v.Clicks
+				c.Impressions = v.Impressions
+				c.Spend = v.Spend
+				c.CPC = v.CPC
+				c.CPP = v.CPP
+				c.CPM = v.CPM
+				c.CTR = v.CTR
+			}
+
+			c.SetUTM()
+			out = append(out, c)
+		}(c)
+	}
+
+	wg.Wait()
+
+	log.Trace("got ", len(out), " campaign aggregates for AccountID ", ID)
 	return
 }
 
-func accounts() (out []account.Entity, err error) {
+func getCampaignDesc(ID string) (cc []campaign.Entity, err error) {
 
-	url := api + "/" + user() + "/adaccounts" + token() + accountFields
+	url := fmt.Sprintf("%s/act_%s/campaigns?%s&%s", api, ID, tokenParam(), descFieldsParam)
 
 	var all []interface{}
 	if all, err = get(url); err != nil {
@@ -74,7 +118,70 @@ func accounts() (out []account.Entity, err error) {
 		return
 	}
 
-	err = json.Unmarshal(data, &out)
+	if err = json.Unmarshal(data, &cc); err != nil {
+		log.WithError(err).Error()
+		return
+	}
+
+	log.Trace("got ", len(cc), " campaign descriptions for AccountID ", ID)
+	return
+}
+
+func getCampaignsSight(ID string) (out []campaign.Entity, err error) {
+
+	url := fmt.Sprintf("%s/act_%s/insights?%s&%s&%s&%s", api, ID, tokenParam(), sightFieldsParam, levelParam, dateParam)
+
+	var all []interface{}
+	if all, err = get(url); err != nil {
+		log.WithError(err).Error()
+		return
+	}
+
+	var data []byte
+	if data, err = json.Marshal(&all); err != nil {
+		log.WithError(err).Error()
+		return
+	}
+
+	if err = json.Unmarshal(data, &out); err != nil {
+		log.WithError(err).Error()
+	}
+
+	log.Trace("got ", len(out), " campaign insights for AccountID ", ID)
+
+	return
+}
+
+func postCampaignStatus(req map[string]interface{}) (v interface{}, err error) {
+
+	url := fmt.Sprintf("%s/%s?%s&%s", api, req["ID"], tokenParam(), req["status"].(campaign.Status).Param())
+
+	if _, err = http.Post(url, formContentType, nil); err != nil {
+		log.WithError(err).Error()
+	}
+
+	return
+}
+
+func accounts() (out []account.Entity, err error) {
+
+	url := fmt.Sprintf("%s/%s/adaccounts?%s&%s", api, user(), tokenParam(), accountFieldsParam)
+
+	var all []interface{}
+	if all, err = get(url); err != nil {
+		log.WithError(err).Error()
+		return
+	}
+
+	var data []byte
+	if data, err = json.Marshal(&all); err != nil {
+		log.WithError(err).Error()
+		return
+	}
+
+	if err = json.Unmarshal(data, &out); err != nil {
+		log.WithError(err).Error()
+	}
 
 	return
 }
@@ -112,7 +219,7 @@ func get(url string, attempts ...int) (data []interface{}, err error) {
 		return
 	}
 
-	var p payload
+	var p fb.Payload
 	if err = json.Unmarshal(body, &p); err != nil {
 		log.WithError(err).Error()
 		return
@@ -132,8 +239,8 @@ func get(url string, attempts ...int) (data []interface{}, err error) {
 	return
 }
 
-func token() string {
-	return "?access_token=" + os.Getenv("tkn")
+func tokenParam() string {
+	return "access_token=" + os.Getenv("tkn")
 }
 
 func user() string {
