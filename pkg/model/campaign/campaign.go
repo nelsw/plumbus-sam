@@ -136,7 +136,7 @@ func (e *Entity) SetFormat() {
 	cpm, _ := decimal.NewFromString(e.CPM)
 	ctr, _ := decimal.NewFromString(e.CTR)
 	e.Formatted = Formatted{
-		DailyBudget:     pretty.USD(dailyBudget),
+		DailyBudget:     pretty.USD(dailyBudget, true),
 		BudgetRemaining: pretty.USD(budgetRemaining),
 		Clicks:          pretty.Int(clicks),
 		Impressions:     pretty.Int(impressions),
@@ -144,10 +144,10 @@ func (e *Entity) SetFormat() {
 		CPC:             pretty.USD(cpc),
 		CPP:             pretty.USD(cpp),
 		CPM:             pretty.USD(cpm),
-		CTR:             pretty.Percent(ctr),
+		CTR:             pretty.Percent(ctr, 2),
 		Revenue:         pretty.USD(decimal.NewFromFloat(e.Revenue)),
 		Profit:          pretty.USD(decimal.NewFromFloat(e.Profit)),
-		ROI:             pretty.Percent(decimal.NewFromFloat(e.ROI)),
+		ROI:             pretty.Percent(decimal.NewFromFloat(e.ROI), 0),
 	}
 }
 
