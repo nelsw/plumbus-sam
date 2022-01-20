@@ -26,7 +26,7 @@ func Handler() string {
 	return handler
 }
 
-type payload struct {
+type Payload struct {
 	Data []interface{} `json:"data"`
 	Page struct {
 		Next string `json:"next"`
@@ -42,7 +42,7 @@ func Get(url string) (data []interface{}, err error) {
 }
 
 func UpdateCampaignStatus(id string, s campaign.Status) (err error) {
-	if _, err = http.Post(api+"/"+id+Token()+s.Status(), formContentType, nil); err != nil {
+	if _, err = http.Post(api+"/"+id+Token()+s.Param(), formContentType, nil); err != nil {
 		log.WithError(err).Error()
 	}
 	return
@@ -76,7 +76,7 @@ func getAttempt(url string, attempt int) (data []interface{}, err error) {
 		return
 	}
 
-	var p payload
+	var p Payload
 	if err = json.Unmarshal(body, &p); err != nil {
 		log.WithError(err).Error()
 		return
