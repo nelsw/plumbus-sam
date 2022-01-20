@@ -185,6 +185,9 @@ func (e *Entity) PutItemInput() *dynamodb.PutItemInput {
 }
 
 func (e *Entity) Spent() float64 {
+	if e.Spend == "" {
+		return 0
+	}
 	f, _ := strconv.ParseFloat(e.Spend, 64)
 	return f
 }

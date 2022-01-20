@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"plumbus/pkg/api"
 	"plumbus/pkg/model/campaign"
-	"plumbus/pkg/model/fb"
 	"plumbus/pkg/model/rule"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/sam"
@@ -207,20 +206,33 @@ func eval(ctx context.Context, r rule.Entity, c campaign.Entity) {
 		return
 	}
 
-	var err error
-	var out *faas.InvokeOutput
+	log.WithFields(log.Fields{
+		"AccountID":    c.AccountID,
+		"CampaignID":   c.ID,
+		"CampaignName": c.Name,
+		"Spend":        c.Spend,
+		"Revenue":      c.Revenue,
+		"Profit":       c.Profit,
+		"ROI":          c.ROI,
+		"RuleID":       r.ID,
+		"RuleName":     r.Named,
+		"Rule Effect":  r.Effect,
+	}).Trace("Campaign met rule conditions; Will attempt to effect change through the campaign handler")
 
-	params := map[string]string{
-		"node":   "campaign",
-		"ID":     c.ID,
-		"status": string(r.Effect),
-	}
-	data, _ := json.Marshal(params)
-	if out, err = sam.NewEvent(ctx, fb.Handler(), data); err != nil {
+	data := sam.NewRequestBytes(http.MethodPatch, map[string]string{
+		"status":    r.Effect.String(),
+		"accountID": c.AccountID,
+		"ID":        c.ID,
+	})
+
+	if out, err := sam.NewEvent(ctx, campaign.Handler(), data); err != nil {
 		log.WithError(err).
 			WithFields(log.Fields{"code": out.StatusCode, "payload": string(out.Payload)}).
 			Error("while sending an update status event to fb handler")
+		return
 	}
+
+	log.Trace("Successfully updated campaign status in Facebook and in the Plumbus database ... grab a beer.")
 }
 
 func main() {
