@@ -1,7 +1,6 @@
 package rule
 
 import (
-	"github.com/google/uuid"
 	"plumbus/pkg/model/campaign"
 	"time"
 )
@@ -45,14 +44,6 @@ type Entity struct {
 
 	// Created is the time this entity was last created.
 	Created time.Time `json:"created"`
-}
-
-func (e *Entity) PrePut() {
-	now := time.Now().UTC()
-	if e.Updated = now; e.ID == "" {
-		e.ID = uuid.NewString()
-		e.Created = now
-	}
 }
 
 type LHS string
