@@ -16,11 +16,11 @@ package: build
 
 # Updates an AWS λƒ; cleans afterwards.
 update: package
-	ENV="{\"Variables\":{}}" sh scripts/update-function.sh clean
+	ENV="{\"Variables\":{}}" sh scripts/update-function.sh && make clean
 
 # Creates an AWS λƒ.
 create: package
-	ENV="{\"Variables\":{}}" sh scripts/create-function.sh clean
+	ENV="{\"Variables\":{}}" sh scripts/create-function.sh && make clean
 
 # Disallow any parallelism (-j) for Make. This is necessary since some commands during the build process create
 # temporary files that collide under parallel conditions.

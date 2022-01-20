@@ -2,6 +2,8 @@ package sam
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/config"
 	faas "github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/lambda/types"
@@ -20,6 +22,23 @@ func init() {
 	}
 }
 
+func NewRequest(method string, params map[string]string) events.APIGatewayV2HTTPRequest {
+	return events.APIGatewayV2HTTPRequest{
+		QueryStringParameters: params,
+		RequestContext: events.APIGatewayV2HTTPRequestContext{
+			HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{
+				Method: method,
+			},
+		},
+	}
+}
+
+func NewRequestBytes(method string, params map[string]string) (out []byte) {
+	req := NewRequest(method, params)
+	out, _ = json.Marshal(&req)
+	return
+}
+
 func NewEvent(ctx context.Context, name string, data []byte) (out *faas.InvokeOutput, err error) {
 	return invoke(ctx, &faas.InvokeInput{
 		FunctionName:   &name,
@@ -28,7 +47,7 @@ func NewEvent(ctx context.Context, name string, data []byte) (out *faas.InvokeOu
 	})
 }
 
-func NewRequest(ctx context.Context, name string, data []byte) (out *faas.InvokeOutput, err error) {
+func NewReqRes(ctx context.Context, name string, data []byte) (out *faas.InvokeOutput, err error) {
 	return invoke(ctx, &faas.InvokeInput{
 		FunctionName:   &name,
 		InvocationType: types.InvocationTypeRequestResponse,

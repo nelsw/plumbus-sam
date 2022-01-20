@@ -25,11 +25,12 @@ import (
 	"net/http"
 	"plumbus/pkg/api"
 	"plumbus/pkg/model/fb"
+	"plumbus/pkg/model/rule"
 	"plumbus/pkg/model/sovrn"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/sam"
-	"plumbus/pkg/util"
 	"plumbus/pkg/util/logs"
+	"plumbus/pkg/util/nums"
 	"strconv"
 	"strings"
 	"sync"
@@ -127,11 +128,11 @@ func (c campaign) utm() string {
 		}
 	}
 
-	if spaced := strings.Split(c.Name, " "); len(spaced) > 1 && util.IsNumber(spaced[0]) {
+	if spaced := strings.Split(c.Name, " "); len(spaced) > 1 && nums.IsNumber(spaced[0]) {
 		return spaced[0]
 	}
 
-	if scored := strings.Split(c.Name, "_"); len(scored) > 1 && util.IsNumber(scored[0]) {
+	if scored := strings.Split(c.Name, "_"); len(scored) > 1 && nums.IsNumber(scored[0]) {
 		return scored[0]
 	}
 
@@ -220,7 +221,7 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 }
 
 func postRoot(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
-	data := api.NewRequestBytes(http.MethodPost, map[string]string{"node": "account"})
+	data := sam.NewRequestBytes(http.MethodPost, map[string]string{"node": "account"})
 	if _, err := sam.NewEvent(ctx, handlerName, data); err != nil {
 		return api.Err(err)
 	}
@@ -231,7 +232,7 @@ func postAccounts(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) 
 	if res, _ := putAccountValuesResponse(ctx); res.StatusCode != http.StatusOK {
 		return res, nil
 	}
-	data := api.NewRequestBytes(http.MethodPost, map[string]string{"node": "campaign"})
+	data := sam.NewRequestBytes(http.MethodPost, map[string]string{"node": "campaign"})
 	if _, err := sam.NewEvent(ctx, handlerName, data); err != nil {
 		return api.Err(err)
 	}
@@ -242,8 +243,8 @@ func postCampaigns(ctx context.Context) (events.APIGatewayV2HTTPResponse, error)
 	if res, _ := putCampaignDetailValuesResponse(ctx); res.StatusCode != http.StatusOK {
 		return res, nil
 	}
-	data := api.NewRequestBytes(http.MethodPost, nil)
-	if _, err := sam.NewEvent(ctx, "plumbus_ruleHandler", data); err != nil {
+	data := sam.NewRequestBytes(http.MethodPost, map[string]string{"node": "all"})
+	if _, err := sam.NewEvent(ctx, rule.Handler(), data); err != nil {
 		return api.Err(err)
 	}
 	return api.K()
@@ -267,7 +268,7 @@ func putAccountValuesResponse(ctx context.Context) (events.APIGatewayV2HTTPRespo
 			}
 		}
 
-		if err := repo.BatchWriteItems(ctx, accountTable, ww); err != nil {
+		if err := repo.BatchWrite(ctx, accountTable, ww); err != nil {
 			log.WithError(err).Error("agg account value batch write items")
 			return api.Err(err)
 		}
@@ -391,7 +392,7 @@ func saveCampaigns(ctx context.Context, cc []campaign) {
 		}
 	}
 
-	if err := repo.BatchWriteItems(ctx, campaignTable, rr); err != nil {
+	if err := repo.BatchWrite(ctx, campaignTable, rr); err != nil {
 		log.WithError(err).Error()
 	}
 }
@@ -405,7 +406,7 @@ func batchGet(ctx context.Context, keys []map[string]types.AttributeValue) (got 
 		},
 	}
 	var out *dynamodb.BatchGetItemOutput
-	if out, err = repo.BatchGetItem(ctx, in); err != nil {
+	if out, err = repo.BatchGet(ctx, in); err != nil {
 		log.WithError(err).Error()
 	} else if err = attributevalue.UnmarshalListOfMaps(out.Responses["plumbus_fb_sovrn"], &got); err != nil {
 		log.WithError(err).Error()
@@ -496,7 +497,7 @@ func addRevenue(ctx context.Context, cc []campaign, ii []insight) {
 
 	wg.Wait()
 
-	if err := repo.BatchWriteItems(ctx, campaignTable, rr); err != nil {
+	if err := repo.BatchWrite(ctx, campaignTable, rr); err != nil {
 		log.WithError(err).Error()
 	}
 }

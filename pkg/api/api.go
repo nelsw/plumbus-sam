@@ -23,6 +23,15 @@ func Nada() (events.APIGatewayV2HTTPResponse, error) {
 	return Err(errors.New("nothing handled"))
 }
 
+func JSON(v interface{}) (events.APIGatewayV2HTTPResponse, error) {
+	data, _ := json.Marshal(&v)
+	return Data(data)
+}
+
+func Data(data []byte) (events.APIGatewayV2HTTPResponse, error) {
+	return OK(string(data))
+}
+
 func OK(body string) (events.APIGatewayV2HTTPResponse, error) {
 	return worker(http.StatusOK, body)
 }
@@ -43,21 +52,4 @@ func worker(code int, body string) (events.APIGatewayV2HTTPResponse, error) {
 func abbreviatedWorker(code int, body string) (events.APIGatewayV2HTTPResponse, error) {
 	log.WithFields(log.Fields{"code": code, "body (len)": len(body)}).Info()
 	return events.APIGatewayV2HTTPResponse{Headers: headers, StatusCode: code, Body: body}, nil
-}
-
-func NewRequestBytes(method string, params map[string]string) (out []byte) {
-	req := NewRequest(method, params)
-	out, _ = json.Marshal(&req)
-	return
-}
-
-func NewRequest(method string, params map[string]string) events.APIGatewayV2HTTPRequest {
-	return events.APIGatewayV2HTTPRequest{
-		QueryStringParameters: params,
-		RequestContext: events.APIGatewayV2HTTPRequestContext{
-			HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{
-				Method: method,
-			},
-		},
-	}
 }

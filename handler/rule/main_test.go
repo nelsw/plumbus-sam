@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/aws/aws-lambda-go/events"
 	"net/http"
+	"plumbus/pkg/model/rule"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ func TestHandle(t *testing.T) {
 		return
 	}
 
-	var rules []Rule
+	var rules []rule.Entity
 	if rules = testGet(); len(rules) < 1 {
 		t.Log("get failed")
 		t.Fail()
@@ -34,17 +35,17 @@ func TestHandle(t *testing.T) {
 
 func testPut() bool {
 
-	b, _ := json.Marshal(&Rule{
-		Name: "test rule",
-		Conditions: []Condition{
+	b, _ := json.Marshal(&rule.Entity{
+		Named: "test rule",
+		Conditions: []rule.Condition{
 			{
-				Target:   targetSpend,
-				Operator: operatorGT,
-				Value:    100,
+				LHS: rule.Spend,
+				Op:  rule.GT,
+				RHS: 100,
 			},
 		},
-		Action: true,
-		Status: true,
+		Effect: rule.Active,
+		Active: true,
 	})
 
 	req := events.APIGatewayV2HTTPRequest{
@@ -61,7 +62,7 @@ func testPut() bool {
 	return out.StatusCode == 200
 }
 
-func testGet() []Rule {
+func testGet() []rule.Entity {
 
 	req := events.APIGatewayV2HTTPRequest{
 		RequestContext: events.APIGatewayV2HTTPRequestContext{
@@ -73,7 +74,7 @@ func testGet() []Rule {
 
 	out, _ := handle(context.TODO(), req)
 
-	var rules []Rule
+	var rules []rule.Entity
 
 	_ = json.Unmarshal([]byte(out.Body), &rules)
 
