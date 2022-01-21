@@ -1,7 +1,6 @@
 package main
 
 import (
-	"plumbus/pkg/model/campaign"
 	"plumbus/pkg/util/pretty"
 	"plumbus/test"
 	"testing"
@@ -16,24 +15,24 @@ func TestHandleAccounts(t *testing.T) {
 func TestHandleCampaigns(t *testing.T) {
 	param := map[string]interface{}{
 		"node": "campaigns",
-		"ID":   "2989088818006204",
+		"ID":   "264100649065412",
 	}
 	if res, err := handle(test.CTX, param); err != nil {
 		t.Error(err)
 	} else {
-		pretty.PrintJson(res)
+		pretty.Print(res)
 	}
 }
 
 func TestHandleCampaignStatusUpdate(t *testing.T) {
 
-	param := map[string]interface{}{
-		"node":   "campaign",
-		"ID":     "23849344181080687",
-		"status": campaign.Paused,
-	}
-
-	if _, err := handle(test.CTX, param); err != nil {
-		t.Error(err)
-	}
+	//param := map[string]interface{}{
+	//	"node":   "campaign",
+	//	"ID":     "23850116984960705",
+	//	"status": campaign.Paused,
+	//}
+	//
+	//if _, err := handle(test.CTX, param); err != nil {
+	//	t.Error(err)
+	//}
 }
