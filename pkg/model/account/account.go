@@ -5,6 +5,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"plumbus/pkg/model/campaign"
+	"plumbus/pkg/util/compare"
 	"strconv"
 	"time"
 )
@@ -18,6 +19,13 @@ func Table() string {
 func TableName() *string {
 	return &table
 }
+
+// ByName implements sort.Interface based on the Name field.
+type ByName []Entity
+
+func (n ByName) Len() int           { return len(n) }
+func (n ByName) Swap(x, y int)      { n[x], n[y] = n[y], n[x] }
+func (n ByName) Less(x, y int) bool { return compare.Strings(n[x].Named, n[y].Named) }
 
 type Entity struct {
 
@@ -39,7 +47,8 @@ type Entity struct {
 	// Included is a flag used by Plumbus to determine which accounts should be considered when executing rules.
 	Included bool
 
-	Campaigns []campaign.Entity
+	// Children are the campaign entities of any status which are owned by this account.
+	Children []campaign.Entity
 }
 
 func (e *Entity) MarshalJSON() (data []byte, err error) {
@@ -73,7 +82,8 @@ func (e *Entity) MarshalJSON() (data []byte, err error) {
 	var created time.Time
 	created, err = time.Parse("2006-01-02T15:04:05-0700", e.Created)
 
-	v := map[string]interface{}{
+	return json.Marshal(map[string]interface{}{
+		"id":             e.ID,
 		"account_id":     e.ID,
 		"name":           e.Named,
 		"account_status": e.Stated,
@@ -81,13 +91,8 @@ func (e *Entity) MarshalJSON() (data []byte, err error) {
 		"included":       e.Included,
 		"status":         status,
 		"created":        created,
-	}
-
-	if len(e.Campaigns) > 0 {
-		v["campaigns"] = e.Campaigns
-	}
-
-	return json.Marshal(v)
+		"children":       e.Children,
+	})
 }
 
 func (e *Entity) UnmarshalJSON(data []byte) (err error) {
@@ -107,6 +112,10 @@ func (e *Entity) UnmarshalJSON(data []byte) (err error) {
 			err = json.Unmarshal(*v, &e.Stated)
 		case "created_time":
 			err = json.Unmarshal(*v, &e.Created)
+		case "children":
+			if e.Children != nil {
+				err = json.Unmarshal(*v, &e.Children)
+			}
 		}
 		if err != nil {
 			return

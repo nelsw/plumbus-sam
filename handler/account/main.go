@@ -20,15 +20,12 @@ import (
 	"plumbus/pkg/repo"
 	"plumbus/pkg/sam"
 	"plumbus/pkg/util/logs"
-	"plumbus/pkg/util/pretty"
 	"regexp"
+	"sort"
 	"sync"
 )
 
-var (
-	posRegexp = regexp.MustCompile(`all|in|ex|fam`)
-	mutex     = sync.Mutex{}
-)
+var posRegexp = regexp.MustCompile(`all|in|ex|fam`)
 
 func init() {
 	logs.Init()
@@ -78,9 +75,23 @@ func get(ctx context.Context, pos string) (events.APIGatewayV2HTTPResponse, erro
 		return api.Err(err)
 	}
 
+	sort.Sort(account.ByName(aa))
+
+	if pos == "all" {
+		if bytes, err := json.Marshal(&aa); err != nil {
+			return api.Err(err)
+		} else {
+			return api.OK(string(bytes))
+		}
+	}
+
 	var wg sync.WaitGroup
 
 	for i, a := range aa {
+
+		if !a.Included {
+			continue
+		}
 
 		wg.Add(1)
 
@@ -90,8 +101,7 @@ func get(ctx context.Context, pos string) (events.APIGatewayV2HTTPResponse, erro
 
 			var err error
 			var out *faas.InvokeOutput
-
-			data := sam.NewRequestBytes(http.MethodGet, map[string]string{"accountID": a.ID})
+			var data = sam.NewRequestBytes(http.MethodGet, map[string]string{"accountID": a.ID})
 			if out, err = sam.NewReqRes(ctx, campaign.Handler(), data); err != nil {
 				log.WithError(err).Error()
 				return
@@ -108,7 +118,7 @@ func get(ctx context.Context, pos string) (events.APIGatewayV2HTTPResponse, erro
 			}
 
 			if res.StatusCode != http.StatusOK {
-				log.WithError(err).Error()
+				log.Warn("unable to get campaigns for account ", a.ID, " status code ", res.StatusCode)
 				return
 			}
 
@@ -118,15 +128,17 @@ func get(ctx context.Context, pos string) (events.APIGatewayV2HTTPResponse, erro
 				return
 			}
 
-			aa[i].Campaigns = cc
+			aa[i].Children = cc
 		}(i, a)
 	}
 
 	wg.Wait()
 
-	pretty.PrintJson(aa)
-
-	return api.JSON(aa)
+	if bytes, err := json.Marshal(&aa); err != nil {
+		return api.Err(err)
+	} else {
+		return api.OK(string(bytes))
+	}
 }
 
 // put requests all accounts from the FB handler and reconciles them with the db before returning given results.

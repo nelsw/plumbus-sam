@@ -245,7 +245,7 @@ func eval(ctx context.Context, r rule.Entity, c campaign.Entity) {
 		"ID":        c.ID,
 	})
 
-	if out, err := sam.NewEvent(ctx, campaign.Handler(), data); err != nil {
+	if out, err := sam.NewReqRes(ctx, campaign.Handler(), data); err != nil {
 		log.WithError(err).
 			WithFields(log.Fields{"code": out.StatusCode, "payload": string(out.Payload)}).
 			Error("while sending an update status event to fb handler")

@@ -7,20 +7,11 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-const (
-	datetimeLayout = "2006-01-02 15:04:05"
-	dateLayout     = "2006-01-02"
-	timeLayout     = "15:04:05"
-	zeroUSD        = "$0.00"
-	zeroPCT        = "0.0%"
-	zeroDEC        = "0.0"
-)
-
 var (
+	num  = accounting.Accounting{}
+	dec  = accounting.Accounting{Symbol: "", Precision: 2}
 	usd0 = accounting.Accounting{Symbol: "$", Precision: 0}
 	usd2 = accounting.Accounting{Symbol: "$", Precision: 2}
-	dec  = accounting.Accounting{Symbol: "", Precision: 2}
-	num  = accounting.Accounting{}
 	pct0 = accounting.Accounting{Symbol: "%", Precision: 0, Format: "%v%s"}
 	pct1 = accounting.Accounting{Symbol: "%", Precision: 1, Format: "%v%s"}
 	pct2 = accounting.Accounting{Symbol: "%", Precision: 2, Format: "%v%s"}
@@ -47,19 +38,7 @@ func Int(v decimal.Decimal) string {
 	return num.FormatMoneyDecimal(v)
 }
 
-func Decimal(v decimal.Decimal) string {
-	return dec.FormatMoneyDecimal(v)
-}
-
-func Json(v interface{}) string {
-	b, _ := json.MarshalIndent(v, "", "    ")
-	return string(b)
-}
-
-func PrintJson(v interface{}) {
-	fmt.Println(Json(v))
-}
-
 func Print(v interface{}) {
-	fmt.Println(Json(v))
+	b, _ := json.MarshalIndent(v, "", "    ")
+	fmt.Println(string(b))
 }

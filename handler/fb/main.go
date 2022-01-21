@@ -31,6 +31,8 @@ const (
 	dateParam          = "date_preset=today"
 )
 
+var mutex = sync.Mutex{}
+
 func init() {
 	logs.Init()
 }
@@ -66,34 +68,37 @@ func getCampaigns(req map[string]interface{}) (out []campaign.Entity, err error)
 		ccc[c.CampaignID] = c
 	}
 
-	if cc, err = getCampaignDesc(ID); err != nil {
+	var desc []campaign.Entity
+	if desc, err = getCampaignDesc(ID); err != nil {
 		log.WithError(err).Error()
 		return
 	}
 
 	var wg sync.WaitGroup
 
-	for _, c := range cc {
+	for _, d := range desc {
 
 		wg.Add(1)
 
-		go func(c campaign.Entity) {
+		go func(d campaign.Entity) {
 
 			defer wg.Done()
 
-			if v, ok := ccc[c.ID]; ok {
-				c.Clicks = v.Clicks
-				c.Impressions = v.Impressions
-				c.Spend = v.Spend
-				c.CPC = v.CPC
-				c.CPP = v.CPP
-				c.CPM = v.CPM
-				c.CTR = v.CTR
+			if v, ok := ccc[d.ID]; ok {
+				d.Clicks = v.Clicks
+				d.Impressions = v.Impressions
+				d.Spend = v.Spend
+				d.CPC = v.CPC
+				d.CPP = v.CPP
+				d.CPM = v.CPM
+				d.CTR = v.CTR
 			}
 
-			c.SetUTM()
-			out = append(out, c)
-		}(c)
+			d.SetUTM()
+			mutex.Lock()
+			out = append(out, d)
+			mutex.Unlock()
+		}(d)
 	}
 
 	wg.Wait()
