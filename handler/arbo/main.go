@@ -4,18 +4,23 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"fmt"
+	"encoding/json"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 	"plumbus/pkg/api"
 	"plumbus/pkg/model/arbo"
+	"plumbus/pkg/repo"
 	"plumbus/pkg/util/logs"
-	"plumbus/pkg/util/pretty"
 	"time"
 )
+
+var client = &http.Client{Timeout: 30 * time.Second}
 
 func init() {
 	logs.Init()
@@ -27,70 +32,131 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 	case http.MethodOptions:
 		return api.K()
 	case http.MethodGet:
-		return get(ctx)
+		return get(ctx, req)
 	case http.MethodPut:
-		return put()
+		return put(ctx)
 	default:
 		return api.Nada()
 	}
 }
 
-func get(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
+func get(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	if id, ok := req.QueryStringParameters["id"]; ok {
+		return batch(ctx, id)
+	} else {
+		return scan(ctx)
+	}
+}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+func batch(ctx context.Context, id string) (events.APIGatewayV2HTTPResponse, error) {
 
-	req, err := http.NewRequest(http.MethodGet, arbo.URL(), nil)
+	in := &dynamodb.BatchGetItemInput{
+		RequestItems: map[string]types.KeysAndAttributes{
+			arbo.Table(): {
+				Keys: []map[string]types.AttributeValue{{"ID": &types.AttributeValueMemberS{Value: id}}},
+			},
+		},
+	}
 
-	if err != nil {
-		log.WithError(err).Error("new request failed")
+	var err error
+	var out *dynamodb.BatchGetItemOutput
+	if out, err = repo.BatchGet(ctx, in); err != nil {
+		log.WithError(err).Error()
 		return api.Err(err)
 	}
 
-	for _, c := range arbo.Cookies() {
-		req.AddCookie(c)
+	var arr []arbo.Entity
+	if err = attributevalue.UnmarshalListOfMaps(out.Responses[arbo.Table()], &arr); err != nil {
+		log.WithError(err).Error()
+		return api.Err(err)
 	}
 
-	for k, v := range arbo.Headers() {
-		req.Header.Set(k, v)
+	log.Trace("batch get for arbo campaign ", id, " found ", len(arr))
+	return api.JSON(arr)
+}
+
+func scan(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
+	var out []arbo.Entity
+	if err := repo.Scan(ctx, &dynamodb.ScanInput{TableName: arbo.TableName()}, &out); err != nil {
+		log.WithError(err).Error("scanning arbo table")
+		return api.Err(err)
 	}
+	return api.JSON(out)
+}
+
+func put(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
+
+	var ee []arbo.Entity
+
+	if arr, err := fetch(arbo.RequestCBSI(ctx)); err != nil {
+		log.WithError(err).Error("error fetching CBSI arbo data")
+		return api.Err(err)
+	} else {
+		ee = append(ee, arr...)
+	}
+
+	if arr, err := fetch(arbo.RequestInuvo(ctx)); err != nil {
+		log.WithError(err).Error("fetching Inuvo arbo data")
+		return api.Err(err)
+	} else {
+		ee = append(ee, arr...)
+	}
+
+	var rr []types.WriteRequest
+	for _, e := range ee {
+		rr = append(rr, e.WriteRequest())
+	}
+
+	if err := repo.BatchWrite(ctx, arbo.Table(), rr); err != nil {
+		log.WithError(err).Error("writing arbo data")
+		return api.Err(err)
+	}
+
+	return api.JSON(ee)
+}
+
+func fetch(req *http.Request) ([]arbo.Entity, error) {
+
+	var err error
 
 	var res *http.Response
 	if res, err = client.Do(req); err != nil {
 		log.WithError(err).Error("client do failed")
-		return api.Err(err)
+		return nil, err
 	}
 
-	fmt.Println(res)
-	pretty.Print(res)
+	log.Trace("response received with status code ", res.StatusCode)
 
 	defer func(Body io.ReadCloser) {
 		if err = Body.Close(); err != nil {
-			log.WithError(err).Error()
+			log.WithError(err).Error("error closing body")
 		}
 	}(res.Body)
 
 	var zr *gzip.Reader
 	if zr, err = gzip.NewReader(res.Body); err != nil {
 		log.WithError(err).Error("gzip reader failed")
-		return api.Err(err)
+		return nil, err
 	}
 
 	var out bytes.Buffer
 	var wrt int64
 	if wrt, err = io.Copy(&out, zr); err != nil {
 		log.WithError(err).Error("writing failed")
-		return api.Err(err)
+		return nil, err
 	}
 
-	log.Trace("written ", wrt)
+	log.Trace("bytes copied: ", wrt)
 
-	fmt.Println(out.String())
+	var pay arbo.Payload
+	if err = json.Unmarshal(out.Bytes(), &pay); err != nil {
+		log.WithError(err).Error("error unmarshalling into payload")
+		return nil, err
+	}
 
-	return api.K()
-}
+	log.Trace("fetched entities: ", len(pay.Data))
 
-func put() (events.APIGatewayV2HTTPResponse, error) {
-	return api.K()
+	return pay.Data, nil
 }
 
 func main() {
