@@ -9,7 +9,6 @@ import (
 
 var (
 	num  = accounting.Accounting{}
-	dec  = accounting.Accounting{Symbol: "", Precision: 2}
 	usd0 = accounting.Accounting{Symbol: "$", Precision: 0}
 	usd2 = accounting.Accounting{Symbol: "$", Precision: 2}
 	pct0 = accounting.Accounting{Symbol: "%", Precision: 0, Format: "%v%s"}
@@ -19,23 +18,27 @@ var (
 
 func USD(v decimal.Decimal, b ...bool) string {
 	if b != nil && len(b) > 0 && b[0] {
-		return usd0.FormatMoneyDecimal(v)
+		return usd0.FormatMoney(v)
 	}
-	return usd2.FormatMoneyDecimal(v)
+	return usd2.FormatMoney(v)
 }
 
-func Percent(v decimal.Decimal, i int) string {
+func Percent(v decimal.Decimal, ii ...int) string {
+	var i int
+	if ii != nil && len(ii) > 0 {
+		i = ii[0]
+	}
 	if i == 0 {
-		return pct0.FormatMoneyDecimal(v)
+		return pct0.FormatMoney(v)
 	} else if i == 1 {
-		return pct1.FormatMoneyDecimal(v)
+		return pct1.FormatMoney(v)
 	} else {
-		return pct2.FormatMoneyDecimal(v)
+		return pct2.FormatMoney(v)
 	}
 }
 
 func Int(v decimal.Decimal) string {
-	return num.FormatMoneyDecimal(v)
+	return num.FormatMoney(v)
 }
 
 func Print(v interface{}) {
