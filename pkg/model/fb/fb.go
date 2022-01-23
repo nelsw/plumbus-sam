@@ -17,12 +17,8 @@ import (
 
 const (
 	api     = "https://graph.facebook.com/v12.0"
-	handler = "plumbus_fbHandler"
+	Handler = "plumbus_fbHandler"
 )
-
-func Handler() string {
-	return handler
-}
 
 type Payload struct {
 	Data []interface{} `json:"data"`

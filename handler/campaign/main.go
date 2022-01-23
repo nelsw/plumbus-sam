@@ -4,22 +4,25 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	faas "github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/smithy-go/ptr"
 	log "github.com/sirupsen/logrus"
 	"net/http"
 	"plumbus/pkg/api"
+	"plumbus/pkg/model/arbo"
 	"plumbus/pkg/model/campaign"
 	"plumbus/pkg/model/fb"
 	"plumbus/pkg/model/sovrn"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/sam"
 	"plumbus/pkg/util/logs"
-	"strconv"
+	"plumbus/pkg/util/nums"
 	"strings"
 )
 
@@ -45,62 +48,72 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 
 func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 
-	ID := req.QueryStringParameters["accountID"]
-	data, _ := json.Marshal(map[string]interface{}{"node": "campaigns", "ID": ID})
-	if out, err := sam.NewReqRes(ctx, fb.Handler(), data); err != nil {
+	data, _ := json.Marshal(map[string]interface{}{"node": "campaigns", "ID": req.QueryStringParameters["accountID"]})
+
+	var err error
+	var out *faas.InvokeOutput
+	if out, err = sam.NewReqRes(ctx, fb.Handler, data); err != nil {
 		log.WithError(err).Error()
 		return api.Err(err)
-	} else {
-
-		var cc []campaign.Entity
-		if err = json.Unmarshal(out.Payload, &cc); err != nil {
-			log.WithError(err).Error()
-			return api.Err(err)
-		}
-
-		var rr []types.WriteRequest
-		for _, c := range cc {
-
-			var x sovrn.Entity
-			if err = repo.Get(ctx, sovrn.Table(), "UTM", c.UTM, &x); err != nil {
-				log.WithError(err).Error()
-				return api.Err(err)
-			}
-
-			if x == (sovrn.Entity{}) {
-				continue
-			}
-
-			rev := x.Revenue
-			spe := c.Spent()
-			pro := x.Revenue - spe
-
-			var roi float64
-			if pro != 0 && spe == 0 {
-				roi = pro
-			} else if pro == 0 && spe != 0 {
-				roi = spe * -1
-			} else if pro != 0 && spe != 0 {
-				roi = pro / spe
-			}
-			c.Revenue = rev
-			c.Profit = pro
-			c.ROI = roi
-
-			if c.Impressions == "" {
-				c.Impressions = strconv.Itoa(x.Impressions)
-			}
-
-			rr = append(rr, c.WriteRequest())
-		}
-
-		if err = repo.BatchWrite(ctx, campaign.Table(), rr); err != nil {
-			return api.Err(err)
-		}
-
-		return api.JSON(cc)
 	}
 
+	var cc []campaign.Entity
+	if err = json.Unmarshal(out.Payload, &cc); err != nil {
+		log.WithError(err).Error()
+		return api.Err(err)
+	}
+
+	var rr []types.WriteRequest
+	for _, c := range cc {
+
+		var r types.WriteRequest
+		if r, err = refresh(ctx, c); err != nil {
+			log.WithError(err).Warn()
+		} else {
+			rr = append(rr, r)
+		}
+	}
+
+	if err = repo.BatchWrite(ctx, campaign.Table, rr); err != nil {
+		return api.Err(err)
+	}
+
+	return api.JSON(cc)
+
+}
+
+func refresh(ctx context.Context, c campaign.Entity) (r types.WriteRequest, err error) {
+
+	var a arbo.Entity
+	var s sovrn.Entity
+
+	if err = repo.Get(ctx, arbo.Table, "ID", c.ID, &a); err != nil {
+		log.WithError(err).Warn()
+	} else if err = repo.Get(ctx, sovrn.Table, "UTM", c.ID, &s); err != nil {
+		log.WithError(err).Warn()
+	}
+
+	if err != nil {
+		log.Trace("errors getting arbo and sovrn data for " + c.ID)
+	} else if a.Id == c.ID {
+		c.Revenue = nums.Float64(a.Revenue)
+		c.Profit = nums.Float64(a.Profit)
+		c.ROI = nums.Float64(a.Roi)
+		r = c.WriteRequest()
+	} else if s.UTM == c.UTM {
+		c.Revenue = s.Revenue
+		c.Profit = c.Revenue - c.Spent()
+		if c.Profit == c.Revenue || c.Profit == c.Spent() {
+			c.ROI = c.Profit
+		} else {
+			c.ROI = c.Profit / c.Spent()
+		}
+		r = c.WriteRequest()
+	} else {
+		err = errors.New("arbo AND sovrn data were empty for " + c.ID)
+	}
+
+	return
 }
 
 func patch(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
@@ -138,13 +151,13 @@ func update(ctx context.Context, accountID, ID string, status campaign.Status) (
 	}
 
 	data, _ := json.Marshal(param)
-	if _, err = sam.NewReqRes(ctx, fb.Handler(), data); err != nil {
+	if _, err = sam.NewReqRes(ctx, fb.Handler, data); err != nil {
 		log.WithError(err).Error()
 		return
 	}
 
 	in := &dynamodb.UpdateItemInput{
-		TableName: campaign.TableName(),
+		TableName: ptr.String(campaign.Table),
 		Key: map[string]types.AttributeValue{
 			"AccountID": &types.AttributeValueMemberS{
 				Value: accountID,
@@ -208,7 +221,7 @@ func batch(ctx context.Context, accountID string, ids []string) (cc []campaign.E
 
 	in := &dynamodb.BatchGetItemInput{
 		RequestItems: map[string]types.KeysAndAttributes{
-			campaign.Table(): {
+			campaign.Table: {
 				Keys: keys,
 			},
 		},
@@ -218,7 +231,7 @@ func batch(ctx context.Context, accountID string, ids []string) (cc []campaign.E
 	if out, err = repo.BatchGet(ctx, in); err != nil {
 		log.WithError(err).Error()
 		return
-	} else if err = attributevalue.UnmarshalListOfMaps(out.Responses[campaign.Table()], &cc); err != nil {
+	} else if err = attributevalue.UnmarshalListOfMaps(out.Responses[campaign.Table], &cc); err != nil {
 		log.WithError(err).Error()
 		return
 	}
@@ -230,7 +243,7 @@ func batch(ctx context.Context, accountID string, ids []string) (cc []campaign.E
 func query(ctx context.Context, accountID string) (cc []campaign.Entity, err error) {
 
 	in := &dynamodb.QueryInput{
-		TableName:              campaign.TableName(),
+		TableName:              ptr.String(campaign.Table),
 		KeyConditionExpression: ptr.String("AccountID = :v1"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":v1": &types.AttributeValueMemberS{Value: accountID},

@@ -32,27 +32,54 @@ func init() {
 }
 
 func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-
 	log.WithFields(log.Fields{"ctx": ctx, "req": req}).Info()
-
 	switch req.RequestContext.HTTP.Method {
-
 	case http.MethodOptions:
 		return api.K()
-
 	case http.MethodGet:
 		return get(ctx, req.QueryStringParameters["pos"])
-
 	case http.MethodPut:
 		return put(ctx)
-
 	case http.MethodPatch:
 		return patch(ctx, req.QueryStringParameters["id"])
-
+	case http.MethodPost:
+		return post(ctx)
 	default:
 		return api.Nada()
 	}
+}
 
+func post(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
+
+	in := dynamodb.ScanInput{
+		TableName: ptr.String(account.Table),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":v1": &types.AttributeValueMemberBOOL{Value: true},
+		},
+		FilterExpression: ptr.String("Included = :v1"),
+	}
+
+	var aa []account.Entity
+	if err := repo.Scan(ctx, &in, &aa); err != nil {
+		return api.Err(err)
+	}
+
+	var wg sync.WaitGroup
+
+	for _, a := range aa {
+		wg.Add(1)
+		go func(a account.Entity) {
+			defer wg.Done()
+			var data = sam.NewRequestBytes(http.MethodPost, map[string]string{"accountID": a.ID})
+			if _, err := sam.NewReqRes(ctx, campaign.Handler, data); err != nil {
+				log.WithError(err).Error("invoking request response to post data for campaigns with account ", a.ID)
+			}
+		}(a)
+	}
+
+	wg.Wait()
+
+	return api.K()
 }
 
 // get scans the db for all accounts where the included value is true, false, or either.
@@ -62,7 +89,7 @@ func get(ctx context.Context, pos string) (events.APIGatewayV2HTTPResponse, erro
 		return api.Err(errors.New("unknown pos: " + pos))
 	}
 
-	in := dynamodb.ScanInput{TableName: account.TableName()}
+	in := dynamodb.ScanInput{TableName: ptr.String(account.Table)}
 	if pos != "all" {
 		in.FilterExpression = ptr.String("Included = :v1")
 		in.ExpressionAttributeValues = map[string]types.AttributeValue{
@@ -102,7 +129,7 @@ func get(ctx context.Context, pos string) (events.APIGatewayV2HTTPResponse, erro
 			var err error
 			var out *faas.InvokeOutput
 			var data = sam.NewRequestBytes(http.MethodGet, map[string]string{"accountID": a.ID})
-			if out, err = sam.NewReqRes(ctx, campaign.Handler(), data); err != nil {
+			if out, err = sam.NewReqRes(ctx, campaign.Handler, data); err != nil {
 				log.WithError(err).Error()
 				return
 			}
@@ -148,7 +175,7 @@ func put(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 	var out *faas.InvokeOutput
 
 	data, _ := json.Marshal(map[string]string{"node": "accounts"})
-	if out, err = sam.NewReqRes(ctx, fb.Handler(), data); err != nil {
+	if out, err = sam.NewReqRes(ctx, fb.Handler, data); err != nil {
 		return api.Err(err)
 	}
 
@@ -160,7 +187,7 @@ func put(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 	var x account.Entity
 	for _, a := range aa {
 
-		if err = repo.Get(ctx, account.Table(), "ID", a.ID, &x); err != nil {
+		if err = repo.Get(ctx, account.Table, "ID", a.ID, &x); err != nil {
 			return api.Err(err)
 		}
 
@@ -182,7 +209,7 @@ func put(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 func patch(ctx context.Context, id string) (events.APIGatewayV2HTTPResponse, error) {
 
 	var x account.Entity
-	if err := repo.Get(ctx, account.Table(), "ID", id, &x); err != nil {
+	if err := repo.Get(ctx, account.Table, "ID", id, &x); err != nil {
 		return api.Err(err)
 	}
 

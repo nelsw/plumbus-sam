@@ -57,14 +57,14 @@ func getCampaigns(req map[string]interface{}) (out []campaign.Entity, err error)
 
 	ID := req["ID"].(string)
 
-	var cc []campaign.Entity
-	if cc, err = getCampaignsSight(ID); err != nil {
+	var insights []campaign.Entity
+	if insights, err = getCampaignsSight(ID); err != nil {
 		log.WithError(err).Error()
 		return
 	}
 
 	ccc := map[string]campaign.Entity{}
-	for _, c := range cc {
+	for _, c := range insights {
 		ccc[c.CampaignID] = c
 	}
 

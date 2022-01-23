@@ -4,21 +4,17 @@ import (
 	"encoding/json"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/smithy-go/ptr"
 	"plumbus/pkg/model/campaign"
 	"plumbus/pkg/util/compare"
 	"strconv"
 	"time"
 )
 
-var table = "plumbus_account"
-
-func Table() string {
-	return table
-}
-
-func TableName() *string {
-	return &table
-}
+const (
+	Table   = "plumbus_account"
+	Handler = "plumbus_accountHandler"
+)
 
 // ByName implements sort.Interface based on the Name field.
 type ByName []Entity
@@ -32,8 +28,7 @@ type Entity struct {
 	// ID is the unique identifier assigned to this object by Facebook. It does not include the "act_" prefix.
 	ID string
 
-	// Named is the name of the account and effectively a magic string for aggregating data and producing KPI's. GL.
-	// Name is a reserved keyword in DynamoDB.
+	// Named is the name of the account as Name is a reserved keyword in DynamoDB.
 	Named string
 
 	// Created is an ISO 8601 formatted datetime representing the instant this account was created in Facebook.
@@ -125,7 +120,7 @@ func (e *Entity) UnmarshalJSON(data []byte) (err error) {
 	return
 }
 
-func (e *Entity) Item() map[string]types.AttributeValue {
+func (e *Entity) item() map[string]types.AttributeValue {
 	return map[string]types.AttributeValue{
 		"ID":       &types.AttributeValueMemberS{Value: e.ID},
 		"Named":    &types.AttributeValueMemberS{Value: e.Named},
@@ -136,9 +131,9 @@ func (e *Entity) Item() map[string]types.AttributeValue {
 }
 
 func (e *Entity) WriteRequest() types.WriteRequest {
-	return types.WriteRequest{PutRequest: &types.PutRequest{Item: e.Item()}}
+	return types.WriteRequest{PutRequest: &types.PutRequest{Item: e.item()}}
 }
 
 func (e *Entity) PutItemInput() *dynamodb.PutItemInput {
-	return &dynamodb.PutItemInput{Item: e.Item(), TableName: TableName()}
+	return &dynamodb.PutItemInput{Item: e.item(), TableName: ptr.String(Table)}
 }

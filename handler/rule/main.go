@@ -73,6 +73,8 @@ func put(ctx context.Context, body string) (events.APIGatewayV2HTTPResponse, err
 	var e rule.Entity
 	if err := json.Unmarshal([]byte(body), &e); err != nil {
 		return api.Err(err)
+	} else if err = e.Effect.Validate(); err != nil {
+		return api.Err(err)
 	}
 
 	now := time.Now().UTC()
@@ -175,7 +177,7 @@ func post(ctx context.Context, r rule.Entity) error {
 
 		var err error
 		var out *faas.InvokeOutput
-		if out, err = sam.NewReqRes(ctx, campaign.Handler(), sam.NewRequestBytes(http.MethodGet, params)); err != nil {
+		if out, err = sam.NewReqRes(ctx, campaign.Handler, sam.NewRequestBytes(http.MethodGet, params)); err != nil {
 			return err
 		}
 
@@ -200,7 +202,7 @@ func post(ctx context.Context, r rule.Entity) error {
 
 func eval(ctx context.Context, r rule.Entity, c campaign.Entity) {
 
-	if string(r.Effect) == c.Circ {
+	if r.Effect == c.Stated {
 		log.Trace("rule effect == campaign status")
 		return
 	}
@@ -229,7 +231,7 @@ func eval(ctx context.Context, r rule.Entity, c campaign.Entity) {
 	log.WithFields(log.Fields{
 		"AccountID":    c.AccountID,
 		"CampaignID":   c.ID,
-		"CampaignName": c.Name,
+		"CampaignName": c.Named,
 		"Spend":        c.Spend,
 		"Revenue":      c.Revenue,
 		"Profit":       c.Profit,
@@ -245,7 +247,7 @@ func eval(ctx context.Context, r rule.Entity, c campaign.Entity) {
 		"ID":        c.ID,
 	})
 
-	if out, err := sam.NewReqRes(ctx, campaign.Handler(), data); err != nil {
+	if out, err := sam.NewReqRes(ctx, campaign.Handler, data); err != nil {
 		log.WithError(err).
 			WithFields(log.Fields{"code": out.StatusCode, "payload": string(out.Payload)}).
 			Error("while sending an update status event to fb handler")
