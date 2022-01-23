@@ -4,14 +4,12 @@ package repo
 
 import (
 	"context"
-	"errors"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	log "github.com/sirupsen/logrus"
 	"plumbus/pkg/util/logs"
-	"strings"
 )
 
 const maxRequestSize = 25 // you can afford more than this jeff
@@ -69,9 +67,7 @@ func Update(ctx context.Context, in *dynamodb.UpdateItemInput) (*dynamodb.Update
 	return db.UpdateItem(ctx, in)
 }
 
-func BatchWrite(ctx context.Context, table string, rr []types.WriteRequest) error {
-
-	var ee []error
+func BatchWrite(ctx context.Context, table string, rr []types.WriteRequest) (err error) {
 
 	var in *dynamodb.BatchWriteItemInput
 	for _, r := range chunkWriteRequests(rr) {
@@ -80,21 +76,12 @@ func BatchWrite(ctx context.Context, table string, rr []types.WriteRequest) erro
 				table: r,
 			},
 		}
-		if _, err := db.BatchWriteItem(ctx, in); err != nil {
-			ee = append(ee, err)
+		if _, err = db.BatchWriteItem(ctx, in); err != nil {
+			break
 		}
 	}
 
-	if len(ee) == 0 {
-		return nil
-	}
-
-	var ss []string
-	for _, e := range ee {
-		ss = append(ss, e.Error())
-	}
-
-	return errors.New(strings.Join(ss, "\n"))
+	return
 }
 
 func BatchGet(ctx context.Context, in *dynamodb.BatchGetItemInput) (*dynamodb.BatchGetItemOutput, error) {
