@@ -25,7 +25,7 @@ import (
 	"sync"
 )
 
-var posRegexp = regexp.MustCompile(`all|in|ex|fam`)
+var posRegexp = regexp.MustCompile(`all|in`)
 
 func init() {
 	logs.Init()
@@ -66,7 +66,7 @@ func get(ctx context.Context, pos string) (events.APIGatewayV2HTTPResponse, erro
 	if pos != "all" {
 		in.FilterExpression = ptr.String("Included = :v1")
 		in.ExpressionAttributeValues = map[string]types.AttributeValue{
-			":v1": &types.AttributeValueMemberBOOL{Value: pos != "ex"},
+			":v1": &types.AttributeValueMemberBOOL{Value: true},
 		}
 	}
 
