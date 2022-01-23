@@ -2,24 +2,12 @@ package arbo
 
 import (
 	"fmt"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"strconv"
 )
 
 const imgHost = "https://dwyeew221rxbg.cloudfront.net/facebook_fu/"
-
-var (
-	table = "plumbus_arbo"
-)
-
-func Table() string {
-	return table
-}
-
-func TableName() *string {
-	return &table
-}
+const Table = "plumbus_arbo"
 
 type Payload struct {
 	Data []Entity `json:"data"`
@@ -53,27 +41,9 @@ type Entity struct {
 	Hrps         interface{} `json:"hrps"`
 	Roi          interface{} `json:"roi"`
 	Stime        string      `json:"stime"`
-	Formatted    formatted   `json:"formatted"`
 }
 
-type formatted struct {
-	Bid          string `json:"bid"`
-	Budget       string `json:"budget"`
-	Spend        string `json:"spend"`
-	Clicks       string `json:"clicks"`
-	Ctr          string `json:"ctr"`
-	Ecpc         string `json:"ecpc"`
-	Simpressions string `json:"simpressions"`
-	Revenue      string `json:"revenue"`
-	Profit       string `json:"profit"`
-	Cpm          string `json:"cpm"`
-	Rimpressions string `json:"rimpressions"`
-	Rps          string `json:"rps"`
-	Hrps         string `json:"hrps"`
-	Roi          string `json:"roi"`
-}
-
-func (e *Entity) Item() map[string]types.AttributeValue {
+func (e *Entity) item() map[string]types.AttributeValue {
 	return map[string]types.AttributeValue{
 		"ID":           &types.AttributeValueMemberS{Value: e.Cid},
 		"UTM":          &types.AttributeValueMemberS{Value: e.Abid},
@@ -121,14 +91,6 @@ func (e *Entity) roi() interface{} {
 	}
 }
 
-func (e *Entity) SetFormat() {
-
-}
-
 func (e *Entity) WriteRequest() types.WriteRequest {
-	return types.WriteRequest{PutRequest: &types.PutRequest{Item: e.Item()}}
-}
-
-func (e *Entity) PutItemInput() *dynamodb.PutItemInput {
-	return &dynamodb.PutItemInput{Item: e.Item(), TableName: TableName()}
+	return types.WriteRequest{PutRequest: &types.PutRequest{Item: e.item()}}
 }
