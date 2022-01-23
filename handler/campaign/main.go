@@ -24,6 +24,7 @@ import (
 	"plumbus/pkg/util/logs"
 	"plumbus/pkg/util/nums"
 	"strings"
+	"time"
 )
 
 func init() {
@@ -65,7 +66,8 @@ func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGat
 
 	var rr []types.WriteRequest
 	for _, c := range cc {
-
+		c.SetUTM()
+		c.SetFormat()
 		var r types.WriteRequest
 		if r, err = refresh(ctx, c); err != nil {
 			log.WithError(err).Warn()
@@ -89,25 +91,27 @@ func refresh(ctx context.Context, c campaign.Entity) (r types.WriteRequest, err 
 
 	if err = repo.Get(ctx, arbo.Table, "ID", c.ID, &a); err != nil {
 		log.WithError(err).Warn()
-	} else if err = repo.Get(ctx, sovrn.Table, "UTM", c.ID, &s); err != nil {
+	} else if err = repo.Get(ctx, sovrn.Table, "UTM", c.UTM, &s); err != nil {
 		log.WithError(err).Warn()
 	}
 
 	if err != nil {
 		log.Trace("errors getting arbo and sovrn data for " + c.ID)
-	} else if a.Id == c.ID {
+	} else if a.ID == c.ID {
 		c.Revenue = nums.Float64(a.Revenue)
 		c.Profit = nums.Float64(a.Profit)
 		c.ROI = nums.Float64(a.Roi)
+		c.Refreshed = time.Now()
 		r = c.WriteRequest()
 	} else if s.UTM == c.UTM {
 		c.Revenue = s.Revenue
 		c.Profit = c.Revenue - c.Spent()
 		if c.Profit == c.Revenue || c.Profit == c.Spent() {
-			c.ROI = c.Profit
+			c.ROI = c.Profit * 100
 		} else {
-			c.ROI = c.Profit / c.Spent()
+			c.ROI = c.Profit / c.Spent() * 100
 		}
+		c.Refreshed = time.Now()
 		r = c.WriteRequest()
 	} else {
 		err = errors.New("arbo AND sovrn data were empty for " + c.ID)

@@ -70,8 +70,8 @@ func post(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 		wg.Add(1)
 		go func(a account.Entity) {
 			defer wg.Done()
-			var data = sam.NewRequestBytes(http.MethodPost, map[string]string{"accountID": a.ID})
-			if _, err := sam.NewReqRes(ctx, campaign.Handler, data); err != nil {
+			var data = sam.NewRequestBytes(http.MethodPut, map[string]string{"accountID": a.ID})
+			if _, err := sam.NewEvent(ctx, campaign.Handler, data); err != nil {
 				log.WithError(err).Error("invoking request response to post data for campaigns with account ", a.ID)
 			}
 		}(a)

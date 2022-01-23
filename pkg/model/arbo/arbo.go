@@ -18,16 +18,16 @@ type Payload struct {
 
 type Entity struct {
 	Id           string      `json:"id"`
-	Abid         string      `json:"abid"`
-	Cid          string      `json:"cid"`
+	ID           string      `json:"cid"`
+	UTM          string      `json:"abid"`
 	PageId       string      `json:"page_id"`
 	Nid          string      `json:"nid"`
 	Checkbox     string      `json:"checkbox"`
-	Status       string      `json:"status"`
+	Stated       string      `json:"status"`
 	Network      []string    `json:"network"`
 	TargetUrl    string      `json:"target_url"`
 	Img          string      `json:"img"`
-	Name         string      `json:"name"`
+	Named        string      `json:"name"`
 	Bid          string      `json:"bid"`
 	Budget       string      `json:"budget"`
 	Buyer        string      `json:"buyer"`
@@ -48,9 +48,9 @@ type Entity struct {
 
 func (e *Entity) item() map[string]types.AttributeValue {
 	return map[string]types.AttributeValue{
-		"ID":           &types.AttributeValueMemberS{Value: e.Cid},
-		"UTM":          &types.AttributeValueMemberS{Value: e.Abid},
-		"Named":        &types.AttributeValueMemberS{Value: e.Name},
+		"ID":           &types.AttributeValueMemberS{Value: e.ID},
+		"UTM":          &types.AttributeValueMemberS{Value: e.UTM},
+		"Named":        &types.AttributeValueMemberS{Value: e.Named},
 		"Img":          &types.AttributeValueMemberS{Value: fmt.Sprintf("%s%s", imgHost, e.Img)},
 		"Bid":          attributeValue(e.Bid),
 		"Budget":       attributeValue(e.Budget),
@@ -93,7 +93,7 @@ func (e *Entity) roi() interface{} {
 		} else if revenue == 0 {
 			return revenue
 		} else {
-			return (revenue - spend) / spend
+			return (revenue - spend) / spend * 100
 		}
 	}
 }
