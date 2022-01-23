@@ -25,11 +25,7 @@ func Nada() (events.APIGatewayV2HTTPResponse, error) {
 
 func JSON(v interface{}) (events.APIGatewayV2HTTPResponse, error) {
 	data, _ := json.Marshal(&v)
-	return Data(data)
-}
-
-func Data(data []byte) (events.APIGatewayV2HTTPResponse, error) {
-	return OK(string(data))
+	return abbreviatedWorker(http.StatusOK, string(data))
 }
 
 func OK(body string) (events.APIGatewayV2HTTPResponse, error) {
