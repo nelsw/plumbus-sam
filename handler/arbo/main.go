@@ -60,7 +60,9 @@ func put(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 		return api.Err(err)
 	}
 
-	return api.JSON(ee)
+	log.Trace("all entities saved")
+
+	return api.K()
 }
 
 func fetch(ctx context.Context, c arbo.Client) ([]arbo.Entity, error) {
