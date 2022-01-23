@@ -17,10 +17,9 @@ import (
 	"plumbus/pkg/model/arbo"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/util/logs"
-	"time"
 )
 
-var client = &http.Client{Timeout: 30 * time.Second}
+var client = &http.Client{}
 
 func init() {
 	logs.Init()
@@ -88,19 +87,17 @@ func put(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 
 	var ee []arbo.Entity
 
-	if arr, err := fetch(arbo.RequestCBSI(ctx)); err != nil {
-		log.WithError(err).Error("error fetching CBSI arbo data")
-		return api.Err(err)
-	} else {
-		ee = append(ee, arr...)
+	for _, c := range arbo.Clients() {
+		if arr, err := fetch(ctx, c); err != nil {
+			log.WithError(err).Error("fetch ", c)
+			return api.Err(err)
+		} else {
+			ee = append(ee, arr...)
+		}
 	}
 
-	if arr, err := fetch(arbo.RequestInuvo(ctx)); err != nil {
-		log.WithError(err).Error("fetching Inuvo arbo data")
-		return api.Err(err)
-	} else {
-		ee = append(ee, arr...)
-	}
+	log.Info("total arbo entities fetched: ", len(ee))
+	// 4,027
 
 	var rr []types.WriteRequest
 	for _, e := range ee {
@@ -115,17 +112,19 @@ func put(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 	return api.JSON(ee)
 }
 
-func fetch(req *http.Request) ([]arbo.Entity, error) {
+func fetch(ctx context.Context, c arbo.Client) ([]arbo.Entity, error) {
+
+	log.Trace("fetching ", c)
 
 	var err error
 
 	var res *http.Response
-	if res, err = client.Do(req); err != nil {
-		log.WithError(err).Error("client do failed")
+	if res, err = client.Do(arbo.NewRequest(ctx, c)); err != nil {
+		log.WithError(err).Error("campaign request failed for ", c)
 		return nil, err
 	}
 
-	log.Trace("response received with status code ", res.StatusCode)
+	log.Trace("campaign request response status code ", res.StatusCode)
 
 	defer func(Body io.ReadCloser) {
 		if err = Body.Close(); err != nil {

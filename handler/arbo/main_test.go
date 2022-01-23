@@ -8,19 +8,15 @@ import (
 )
 
 func TestHandlePut(t *testing.T) {
-
-	req := sam.NewRequest(http.MethodPut, nil)
+	req := sam.NewRequest(http.MethodPut, map[string]string{"client": "173"})
 	if res, _ := handle(test.CTX, req); res.StatusCode != http.StatusOK {
 		t.Error(res.StatusCode, res.Body)
 	}
-
 }
 
 func TestHandleGet(t *testing.T) {
-
 	req := sam.NewRequest(http.MethodGet, nil)
 	if res, _ := handle(test.CTX, req); res.StatusCode != http.StatusOK {
 		t.Error(res.StatusCode, res.Body)
 	}
-
 }

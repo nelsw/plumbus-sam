@@ -1,27 +1,16 @@
 package arbo
 
 import (
-	"context"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"net/http"
-	"net/url"
 	"strconv"
-	"strings"
-	"time"
 )
 
 const imgHost = "https://dwyeew221rxbg.cloudfront.net/facebook_fu/"
 
-const (
-	cbsi  = "%220497a316-03bc-42b7-a9fc-4af6ab3f0130%22"
-	inuvo = "%220497a316-03bc-42b7-a9fc-4af6ab3f0130%22"
-)
-
 var (
-	table   = "plumbus_arbo"
-	handler = "plumbus_arboHandler"
+	table = "plumbus_arbo"
 )
 
 func Table() string {
@@ -30,10 +19,6 @@ func Table() string {
 
 func TableName() *string {
 	return &table
-}
-
-func Handler() string {
-	return handler
 }
 
 type Payload struct {
@@ -101,18 +86,78 @@ type Entity struct {
 	Rimpressions interface{} `json:"rimpressions"`
 	Rps          interface{} `json:"rps"`
 	Hrps         interface{} `json:"hrps"`
-	Roi          string      `json:"roi"`
+	Roi          interface{} `json:"roi"`
 	Stime        string      `json:"stime"`
+	Formatted    formatted   `json:"formatted"`
+}
+
+type formatted struct {
+	Bid          string `json:"bid"`
+	Budget       string `json:"budget"`
+	Spend        string `json:"spend"`
+	Clicks       string `json:"clicks"`
+	Ctr          string `json:"ctr"`
+	Ecpc         string `json:"ecpc"`
+	Simpressions string `json:"simpressions"`
+	Revenue      string `json:"revenue"`
+	Profit       string `json:"profit"`
+	Cpm          string `json:"cpm"`
+	Rimpressions string `json:"rimpressions"`
+	Rps          string `json:"rps"`
+	Hrps         string `json:"hrps"`
+	Roi          string `json:"roi"`
 }
 
 func (e *Entity) Item() map[string]types.AttributeValue {
 	return map[string]types.AttributeValue{
-		"ID":      &types.AttributeValueMemberS{Value: e.Cid},
-		"UTM":     &types.AttributeValueMemberS{Value: e.Abid},
-		"Named":   &types.AttributeValueMemberS{Value: e.Name},
-		"Img":     &types.AttributeValueMemberS{Value: fmt.Sprintf("%s%s", imgHost, e.Img)},
-		"Revenue": &types.AttributeValueMemberN{Value: fmt.Sprintf("%f", e.Revenue)},
+		"ID":           &types.AttributeValueMemberS{Value: e.Cid},
+		"UTM":          &types.AttributeValueMemberS{Value: e.Abid},
+		"Named":        &types.AttributeValueMemberS{Value: e.Name},
+		"Img":          &types.AttributeValueMemberS{Value: fmt.Sprintf("%s%s", imgHost, e.Img)},
+		"Bid":          attributeValue(e.Bid),
+		"Budget":       attributeValue(e.Budget),
+		"Spend":        attributeValue(e.Spend),
+		"Clicks":       attributeValue(e.Clicks),
+		"CTR":          attributeValue(e.Ctr),
+		"eCPC":         attributeValue(e.Ecpc),
+		"sImpressions": attributeValue(e.Simpressions),
+		"Revenue":      attributeValue(e.Revenue),
+		"Profit":       attributeValue(e.Profit),
+		"CPM":          attributeValue(e.Cpm),
+		"rImpressions": attributeValue(e.Rimpressions),
+		"RPS":          attributeValue(e.Rps),
+		"hRPS":         attributeValue(e.Hrps),
+		"ROI":          attributeValue(e.roi()),
+		"sTime":        &types.AttributeValueMemberS{Value: e.Stime},
 	}
+}
+
+func attributeValue(v interface{}) types.AttributeValue {
+	if v == nil {
+		return &types.AttributeValueMemberNULL{Value: true}
+	} else {
+		return &types.AttributeValueMemberS{Value: fmt.Sprintf("%v", v)}
+	}
+}
+
+func (e *Entity) roi() interface{} {
+	if e.Roi != nil && e.Roi != "" {
+		return e.Roi
+	} else if e.Spend == nil || e.Revenue == nil {
+		return nil
+	} else if s, err := strconv.ParseFloat(e.Spend.(string), 64); err != nil {
+		return nil
+	} else if r := e.Revenue.(float64); s == 0 {
+		return r
+	} else if p := r - s; r == 0 {
+		return p
+	} else {
+		return p / s
+	}
+}
+
+func (e *Entity) SetFormat() {
+
 }
 
 func (e *Entity) WriteRequest() types.WriteRequest {
@@ -121,162 +166,4 @@ func (e *Entity) WriteRequest() types.WriteRequest {
 
 func (e *Entity) PutItemInput() *dynamodb.PutItemInput {
 	return &dynamodb.PutItemInput{Item: e.Item(), TableName: TableName()}
-}
-
-func RequestCBSI(ctx context.Context) *http.Request {
-	return request(ctx, cbsi)
-}
-
-func RequestInuvo(ctx context.Context) *http.Request {
-	return request(ctx, inuvo)
-}
-
-func request(ctx context.Context, client string) *http.Request {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, uri(), nil)
-	for _, c := range cookies(client) {
-		req.AddCookie(c)
-	}
-	for k, v := range headers(client) {
-		req.Header.Set(k, v)
-	}
-	return req
-}
-
-func uri() string {
-
-	now := time.Now()
-
-	d := now.Format("January 2, 2006")
-	dr := url.PathEscape(fmt.Sprintf("%s - %s", d, d))
-
-	s := strconv.Itoa(int(now.UnixMilli()))
-
-	return fmt.Sprintf("https://arbotron.com/nac_handler.php?cmd=get_campaigns&dr=%s&nt=facebook&nid=all&_=%s", dr, s)
-}
-
-func headers(client string) map[string]string {
-
-	var chunks []string
-	for _, cookie := range cookies(client) {
-		chunks = append(chunks, fmt.Sprintf("%s=%s;", cookie.Name, cookie.Value))
-	}
-
-	return map[string]string{
-		"Host":                      "arbotron.com",
-		"User-Agent":                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:96.0) Gecko/20100101 Firefox/96.0",
-		"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-		"Accept-Language":           "en-US,en;q=0.5",
-		"Accept-Encoding":           "gzip, deflate, br",
-		"DNT":                       "1",
-		"Connection":                "keep-alive",
-		"Cookie":                    strings.Join(chunks, " "),
-		"Upgrade-Insecure-Requests": "1",
-		"Sec-Fetch-Dest":            "document",
-		"Sec-Fetch-Mode":            "navigate",
-		"Sec-Fetch-Site":            "none",
-		"Sec-Fetch-User":            "?1",
-	}
-}
-
-func cookies(client string) []*http.Cookie {
-	return []*http.Cookie{
-		hjSample(),
-		hjSession(),
-		hjUser(),
-		adwave(),
-		ajsAnon(client),
-		ajsGroup(),
-		deviceHash(),
-	}
-}
-
-func hjSample() *http.Cookie {
-	exp, _ := time.Parse(time.RFC1123, "Fri, 21 Jan 2022 23:12:05 GMT")
-	return &http.Cookie{
-		Name:     "_hjIncludedInSessionSample",
-		Value:    "0",
-		Path:     "/",
-		Domain:   ".arbotron.com",
-		Expires:  exp,
-		MaxAge:   int(exp.Sub(time.Now()).Seconds()),
-		SameSite: http.SameSiteLaxMode,
-	}
-}
-
-func hjSession() *http.Cookie {
-	exp, _ := time.Parse(time.RFC1123, "Fri, 21 Jan 2022 23:36:04 GMT")
-	return &http.Cookie{
-		Name:     "_hjSession_2735539",
-		Value:    "eyJpZCI6ImFjNGEyOTljLWY4OTctNDcwYi1hMzQ3LWU3ZjAyMDEyMzdmNSIsImNyZWF0ZWQiOjE2NDI4MDYzNjQzMjQsImluU2FtcGxlIjpmYWxzZX0=",
-		Path:     "/",
-		Domain:   ".arbotron.com",
-		Expires:  exp,
-		MaxAge:   int(exp.Sub(time.Now()).Seconds()),
-		SameSite: http.SameSiteLaxMode,
-	}
-}
-
-func hjUser() *http.Cookie {
-	exp, _ := time.Parse(time.RFC1123, "Sat, 21 Jan 2023 23:06:04 GMT")
-	return &http.Cookie{
-		Name:     "_hjSessionUser_2735539",
-		Value:    "eyJpZCI6ImQwNDRhOGVmLWY4NmEtNTljZC04YjkxLWYwN2M1MDEzYzM2NyIsImNyZWF0ZWQiOjE2NDE5MjA3MDQyMDYsImV4aXN0aW5nIjp0cnVlfQ==",
-		Path:     "/",
-		Domain:   ".arbotron.com",
-		Expires:  exp,
-		MaxAge:   int(exp.Sub(time.Now()).Seconds()),
-		SameSite: http.SameSiteLaxMode,
-	}
-}
-
-func adwave() *http.Cookie {
-	exp, _ := time.Parse(time.RFC1123, "Sun, 11 Dec 2022 11:53:30 GMT")
-	return &http.Cookie{
-		Name:     "AdwaveContent",
-		Value:    "ikbdhk791ak9pf66grkgqa0qq3",
-		Path:     "/",
-		Domain:   ".arbotron.com",
-		Expires:  exp,
-		MaxAge:   int(exp.Sub(time.Now()).Seconds()),
-		SameSite: http.SameSiteNoneMode,
-	}
-}
-
-func ajsAnon(client string) *http.Cookie {
-	exp, _ := time.Parse(time.RFC1123, "Sat, 21 Jan 2023 23:06:04 GMT")
-	return &http.Cookie{
-		Name:     "ajs_anonymous_id",
-		Value:    client,
-		Path:     "/",
-		Domain:   ".arbotron.com",
-		Expires:  exp,
-		MaxAge:   int(exp.Sub(time.Now()).Seconds()),
-		SameSite: http.SameSiteLaxMode,
-	}
-}
-
-func ajsGroup() *http.Cookie {
-	exp, _ := time.Parse(time.RFC1123, "Sat, 21 Jan 2023 23:06:04 GMT")
-	return &http.Cookie{
-		Name:     "ajs_group_id",
-		Value:    "null",
-		Path:     "/",
-		Domain:   ".arbotron.com",
-		Expires:  exp,
-		MaxAge:   int(exp.Sub(time.Now()).Seconds()),
-		SameSite: http.SameSiteLaxMode,
-	}
-}
-
-func deviceHash() *http.Cookie {
-	exp, _ := time.Parse(time.RFC1123, "Wed, 11 Jan 2023 17:04:59 GMT")
-	return &http.Cookie{
-		Name:     "device_hash",
-		Value:    "07b7b9f27733b4d1cb6dae7806f20e3c127ec0a2",
-		Path:     "/",
-		Domain:   ".arbotron.com",
-		Expires:  exp,
-		MaxAge:   int(exp.Sub(time.Now()).Seconds()),
-		SameSite: http.SameSiteNoneMode,
-	}
 }
