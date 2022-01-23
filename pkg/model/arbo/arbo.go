@@ -3,11 +3,14 @@ package arbo
 import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"strconv"
+	"plumbus/pkg/util/nums"
 )
 
-const imgHost = "https://dwyeew221rxbg.cloudfront.net/facebook_fu/"
-const Table = "plumbus_arbo"
+const (
+	imgHost = "https://dwyeew221rxbg.cloudfront.net/facebook_fu/"
+	Table   = "plumbus_arbo"
+	Handler = "plumbus_arboHandler"
+)
 
 type Payload struct {
 	Data []Entity `json:"data"`
@@ -80,14 +83,18 @@ func (e *Entity) roi() interface{} {
 		return e.Roi
 	} else if e.Spend == nil || e.Revenue == nil {
 		return nil
-	} else if s, err := strconv.ParseFloat(e.Spend.(string), 64); err != nil {
-		return nil
-	} else if r := e.Revenue.(float64); s == 0 {
-		return r
-	} else if p := r - s; r == 0 {
-		return p
 	} else {
-		return p / s
+		spend := nums.Float64(e.Spend)
+		revenue := nums.Float64(e.Revenue)
+		if spend == 0 && revenue == 0 {
+			return 0
+		} else if spend == 0 {
+			return spend
+		} else if revenue == 0 {
+			return revenue
+		} else {
+			return (revenue - spend) / spend
+		}
 	}
 }
 
