@@ -161,11 +161,7 @@ func get(ctx context.Context, pos string) (events.APIGatewayV2HTTPResponse, erro
 
 	wg.Wait()
 
-	if bytes, err := json.Marshal(&aa); err != nil {
-		return api.Err(err)
-	} else {
-		return api.OK(string(bytes))
-	}
+	return api.JSON(&aa)
 }
 
 // put requests all accounts from the FB handler and reconciles them with the db before returning given results.
