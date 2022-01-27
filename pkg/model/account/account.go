@@ -7,6 +7,7 @@ import (
 	"github.com/aws/smithy-go/ptr"
 	"plumbus/pkg/model/campaign"
 	"plumbus/pkg/util/compare"
+	"plumbus/pkg/util/pretty"
 	"strconv"
 	"time"
 )
@@ -44,6 +45,38 @@ type Entity struct {
 
 	// Children are the campaign entities of any status which are owned by this account.
 	Children []campaign.Entity
+
+	Performance Performance
+}
+
+type Performance struct {
+	Spend float64 `json:"spend"`
+
+	SpendStr string `json:"spend_str"`
+
+	Revenue float64 `json:"revenue"`
+
+	RevenueStr string `json:"revenue_str"`
+
+	Profit float64 `json:"profit"`
+
+	ProfitStr string `json:"profit_str"`
+
+	ROI float64 `json:"roi"`
+
+	ROIStr string `json:"roi_str"`
+
+	Active int `json:"active"`
+
+	ActiveStr string `json:"active_str"`
+}
+
+func (p *Performance) SetFormat() {
+	p.SpendStr = pretty.USD(p.Spend)
+	p.RevenueStr = pretty.USD(p.Revenue)
+	p.ProfitStr = pretty.USD(p.Profit)
+	p.ROIStr = pretty.Percent(p.ROI, 0)
+	p.ActiveStr = pretty.Int(p.Active)
 }
 
 func (e *Entity) MarshalJSON() (data []byte, err error) {
@@ -77,6 +110,19 @@ func (e *Entity) MarshalJSON() (data []byte, err error) {
 	var created time.Time
 	created, err = time.Parse("2006-01-02T15:04:05-0700", e.Created)
 
+	if e.Children != nil && len(e.Children) > 0 {
+		for _, c := range e.Children {
+			if c.Stated == campaign.Active {
+				e.Performance.Active += 1
+			}
+			e.Performance.Spend += c.Spent()
+			e.Performance.Revenue += c.Revenue
+			e.Performance.Profit += c.Profit
+			e.Performance.ROI += c.ROI
+		}
+		e.Performance.SetFormat()
+	}
+
 	return json.Marshal(map[string]interface{}{
 		"id":             e.ID,
 		"account_id":     e.ID,
@@ -87,6 +133,7 @@ func (e *Entity) MarshalJSON() (data []byte, err error) {
 		"status":         status,
 		"created":        created,
 		"children":       e.Children,
+		"performance":    e.Performance,
 	})
 }
 
