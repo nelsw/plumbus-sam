@@ -1,6 +1,7 @@
 package main
 
 import (
+	"plumbus/pkg/model/campaign"
 	"plumbus/pkg/util/pretty"
 	"plumbus/test"
 	"testing"
@@ -26,13 +27,13 @@ func TestHandleCampaigns(t *testing.T) {
 
 func TestHandleCampaignStatusUpdate(t *testing.T) {
 
-	//param := map[string]interface{}{
-	//	"node":   "campaign",
-	//	"ID":     "23850116984960705",
-	//	"status": campaign.Paused,
-	//}
-	//
-	//if _, err := handle(test.CTX, param); err != nil {
-	//	t.Error(err)
-	//}
+	param := map[string]interface{}{
+		"node":   "campaign",
+		"ID":     "23850116984960705",
+		"status": campaign.Paused,
+	}
+
+	if _, err := handle(test.CTX, param); err != nil {
+		t.Error(err)
+	}
 }
