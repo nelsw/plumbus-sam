@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -69,11 +68,10 @@ func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGat
 		c.SetUTM()
 		c.SetFormat()
 		var r types.WriteRequest
-		if r, err = refresh(ctx, c); err != nil {
+		if r, err = refresh(ctx, &c); err != nil {
 			log.WithError(err).Warn()
-		} else {
-			rr = append(rr, r)
 		}
+		rr = append(rr, r) // we always get a response
 	}
 
 	if err = repo.BatchWrite(ctx, campaign.Table, rr); err != nil {
@@ -84,7 +82,7 @@ func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGat
 
 }
 
-func refresh(ctx context.Context, c campaign.Entity) (r types.WriteRequest, err error) {
+func refresh(ctx context.Context, c *campaign.Entity) (r types.WriteRequest, err error) {
 
 	var a arbo.Entity
 	var s sovrn.Entity
@@ -94,6 +92,9 @@ func refresh(ctx context.Context, c campaign.Entity) (r types.WriteRequest, err 
 	} else if err = repo.Get(ctx, sovrn.Table, "UTM", c.UTM, &s); err != nil {
 		log.WithError(err).Warn()
 	}
+
+	// assign r here in event of err or empty performance data
+	r = c.WriteRequest()
 
 	if err != nil {
 		log.Trace("errors getting arbo and sovrn data for " + c.ID)
@@ -113,8 +114,6 @@ func refresh(ctx context.Context, c campaign.Entity) (r types.WriteRequest, err 
 		}
 		c.Refreshed = time.Now()
 		r = c.WriteRequest()
-	} else {
-		err = errors.New("arbo AND sovrn data were empty for " + c.ID)
 	}
 
 	return
