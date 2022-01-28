@@ -4,19 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/shopspring/decimal"
 	"plumbus/pkg/util/nums"
 	"plumbus/pkg/util/pretty"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 )
 
 var (
-	Table        = "plumbus_fb_campaign"
-	Handler      = "plumbus_campaignHandler"
-	statusRegexp = regexp.MustCompile("ACTIVE|PAUSED|DELETED|ARCHIVED")
+	Table   = "plumbus_fb_campaign"
+	Handler = "plumbus_campaignHandler"
 )
 
 type Status string
@@ -37,10 +33,18 @@ func (s Status) String() string {
 }
 
 func (s Status) Validate() error {
-	if str := s.String(); !statusRegexp.MatchString(str) {
-		return errors.New(fmt.Sprintf("Invalid Status: [%s], must be ACTIVE, PAUSED, DELETED, or ARCHIVED", str))
+	switch s {
+	case Active:
+		fallthrough
+	case Paused:
+		fallthrough
+	case Deleted:
+		fallthrough
+	case Archived:
+		return nil
+	default:
+		return errors.New(fmt.Sprintf("Invalid Status: [%v], must be ACTIVE, PAUSED, DELETED, or ARCHIVED", s))
 	}
-	return nil
 }
 
 type Entity struct {
@@ -150,29 +154,30 @@ type Node struct {
 	Named string `json:"name"`
 }
 
+func (e *Entity) SetPerformance() {
+	spend := nums.Float64(e.Spend)
+	e.Profit = e.Revenue - spend
+	if e.Profit == e.Revenue || e.Profit == spend {
+		e.ROI = e.Profit * 100
+	} else {
+		e.ROI = e.Profit / spend * 100
+	}
+}
+
 func (e *Entity) SetFormat() {
-	dailyBudget, _ := decimal.NewFromString(e.DailyBudget)
-	budgetRemaining, _ := decimal.NewFromString(e.BudgetRemaining)
-	clicks, _ := decimal.NewFromString(e.Clicks)
-	impressions, _ := decimal.NewFromString(e.Impressions)
-	spend, _ := decimal.NewFromString(e.Spend)
-	cpc, _ := decimal.NewFromString(e.CPC)
-	cpp, _ := decimal.NewFromString(e.CPP)
-	cpm, _ := decimal.NewFromString(e.CPM)
-	ctr, _ := decimal.NewFromString(e.CTR)
 	e.Formatted = Formatted{
-		DailyBudget:     pretty.USD(dailyBudget, true),
-		BudgetRemaining: pretty.USD(budgetRemaining),
-		Clicks:          pretty.Int(clicks),
-		Impressions:     pretty.Int(impressions),
-		Spend:           pretty.USD(spend),
-		CPC:             pretty.USD(cpc),
-		CPP:             pretty.USD(cpp),
-		CPM:             pretty.USD(cpm),
-		CTR:             pretty.Percent(ctr, 2),
-		Revenue:         pretty.USD(decimal.NewFromFloat(e.Revenue)),
-		Profit:          pretty.USD(decimal.NewFromFloat(e.Profit)),
-		ROI:             pretty.Percent(decimal.NewFromFloat(e.ROI), 0),
+		DailyBudget:     pretty.USD(e.DailyBudget, true),
+		BudgetRemaining: pretty.USD(e.BudgetRemaining),
+		Clicks:          pretty.Int(e.Clicks),
+		Impressions:     pretty.Int(e.Impressions),
+		Spend:           pretty.USD(e.Spend),
+		CPC:             pretty.USD(e.CPC),
+		CPP:             pretty.USD(e.CPP),
+		CPM:             pretty.USD(e.CPM),
+		CTR:             pretty.Percent(e.CTR, 2),
+		Revenue:         pretty.USD(e.Revenue),
+		Profit:          pretty.USD(e.Profit),
+		ROI:             pretty.Percent(e.ROI, 0),
 	}
 }
 
@@ -184,6 +189,7 @@ func (e *Entity) item() map[string]types.AttributeValue {
 		"Stated":          &types.AttributeValueMemberS{Value: e.Stated.String()},
 		"Created":         &types.AttributeValueMemberS{Value: e.Created},
 		"Updated":         &types.AttributeValueMemberS{Value: e.Updated},
+		"Refreshed":       &types.AttributeValueMemberS{Value: time.Now().Format(time.RFC3339)},
 		"DailyBudget":     &types.AttributeValueMemberS{Value: e.DailyBudget},
 		"BudgetRemaining": &types.AttributeValueMemberS{Value: e.BudgetRemaining},
 		"Clicks":          &types.AttributeValueMemberS{Value: e.Clicks},
@@ -200,15 +206,43 @@ func (e *Entity) item() map[string]types.AttributeValue {
 	}
 }
 
-func (e *Entity) WriteRequest() types.WriteRequest {
-	return types.WriteRequest{PutRequest: &types.PutRequest{Item: e.item()}}
-}
-
-func (e *Entity) Spent() (f float64) {
-	if e.Spend != "" {
-		f, _ = strconv.ParseFloat(e.Spend, 64)
+func (e *Entity) WriteRequest(b ...bool) (wr types.WriteRequest) {
+	if b != nil && len(b) > 0 && b[0] {
+		wr.DeleteRequest = &types.DeleteRequest{
+			Key: map[string]types.AttributeValue{
+				"AccountID": &types.AttributeValueMemberS{
+					Value: e.AccountID,
+				},
+				"ID": &types.AttributeValueMemberS{
+					Value: e.ID,
+				},
+			},
+		}
+	} else {
+		wr.PutRequest = &types.PutRequest{
+			Item: e.item(),
+		}
 	}
 	return
+}
+
+func (e *Entity) Spent() float64 {
+	return nums.Float64(e.Spend)
+}
+
+func (e *Entity) GetUTM() string {
+	if e.UTM != "" {
+		return e.UTM
+	} else if spaced := strings.Split(e.Named, " "); len(spaced) > 1 && nums.IsNumber(spaced[0]) {
+		return spaced[0]
+	} else if scored := strings.Split(e.Named, "_"); len(scored) > 1 && nums.IsNumber(scored[0]) {
+		return scored[0]
+	} else if chunks := strings.Split(e.Named, "("); len(chunks) > 1 {
+		if chunks = strings.Split(chunks[1], ")"); len(chunks) > 1 {
+			return chunks[0]
+		}
+	}
+	return e.ID
 }
 
 func (e *Entity) SetUTM() {
