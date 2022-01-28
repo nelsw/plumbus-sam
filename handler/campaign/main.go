@@ -88,6 +88,9 @@ func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGat
 	rr = []types.WriteRequest{}
 	for _, c := range cc {
 		if val, ok := ccc[c.ID]; ok {
+			val.SetPerformance()
+			val.SetFormat()
+			val.SetUTM()
 			ret = append(ret, val)
 		} else {
 			rr = append(rr, c.WriteRequest(true))
@@ -222,6 +225,7 @@ func get(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGat
 	for i := range out {
 		out[i].SetPerformance()
 		out[i].SetFormat()
+		out[i].SetUTM()
 	}
 
 	return api.JSON(out)
