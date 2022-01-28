@@ -20,12 +20,13 @@ import (
 	"plumbus/pkg/repo"
 	"plumbus/pkg/sam"
 	"plumbus/pkg/util/logs"
+	"plumbus/pkg/util/pretty"
 	"regexp"
 	"sort"
 	"sync"
 )
 
-var posRegexp = regexp.MustCompile(`all|in`)
+var posRegexp = regexp.MustCompile(`all|in|fam`)
 
 func init() {
 	logs.Init()
@@ -155,7 +156,17 @@ func get(ctx context.Context, pos string) (events.APIGatewayV2HTTPResponse, erro
 				return
 			}
 
-			aa[i].Children = cc
+			aa[i].Campaigns = cc
+
+			if pos == "fam" {
+				var nn []campaign.Node
+				if err = json.Unmarshal([]byte(res.Body), &nn); err != nil {
+					log.WithError(err).Error()
+					return
+				}
+				pretty.Print(nn)
+				aa[i].Children = nn
+			}
 		}(i, a)
 	}
 

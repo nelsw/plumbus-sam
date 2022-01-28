@@ -43,8 +43,11 @@ type Entity struct {
 	// Included is a flag used by Plumbus to determine which accounts should be considered when executing rules.
 	Included bool
 
-	// Children are the campaign entities of any status which are owned by this account.
-	Children []campaign.Entity
+	// Campaigns are the campaign entities of any status which are owned by this account.
+	Campaigns []campaign.Entity
+
+	// Nodes are abbreviated campaign entities of any status which are owned by this account.
+	Children []campaign.Node
 
 	Performance Performance
 }
@@ -69,6 +72,10 @@ type Performance struct {
 	Active int `json:"active"`
 
 	ActiveStr string `json:"active_str"`
+
+	Inactive int `json:"inactive"`
+
+	InactiveStr string `json:"inactive_str"`
 }
 
 func (p *Performance) SetFormat() {
@@ -77,6 +84,7 @@ func (p *Performance) SetFormat() {
 	p.ProfitStr = pretty.USD(p.Profit)
 	p.ROIStr = pretty.Percent(p.ROI, 0)
 	p.ActiveStr = pretty.Int(p.Active)
+	p.InactiveStr = pretty.Int(p.Inactive)
 }
 
 func (e *Entity) MarshalJSON() (data []byte, err error) {
@@ -110,8 +118,8 @@ func (e *Entity) MarshalJSON() (data []byte, err error) {
 	var created time.Time
 	created, err = time.Parse("2006-01-02T15:04:05-0700", e.Created)
 
-	if e.Children != nil && len(e.Children) > 0 {
-		for _, c := range e.Children {
+	if e.Campaigns != nil && len(e.Campaigns) > 0 {
+		for _, c := range e.Campaigns {
 			if c.Stated == campaign.Active {
 				e.Performance.Active += 1
 			}
@@ -120,6 +128,10 @@ func (e *Entity) MarshalJSON() (data []byte, err error) {
 			e.Performance.Profit += c.Profit
 			e.Performance.ROI += c.ROI
 		}
+		if e.Performance.Active > 0 {
+			e.Performance.ROI /= float64(e.Performance.Active)
+		}
+		e.Performance.Inactive = len(e.Campaigns) - e.Performance.Active
 		e.Performance.SetFormat()
 	}
 
