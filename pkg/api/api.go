@@ -24,8 +24,12 @@ func Nada() (events.APIGatewayV2HTTPResponse, error) {
 }
 
 func JSON(v interface{}) (events.APIGatewayV2HTTPResponse, error) {
-	data, _ := json.Marshal(&v)
-	return abbreviatedWorker(http.StatusOK, string(data))
+	if data, err := json.Marshal(&v); err != nil {
+		log.WithError(err).Error("while marshalling JSON for API Response!")
+		return Err(err)
+	} else {
+		return abbreviatedWorker(http.StatusOK, string(data))
+	}
 }
 
 func OK(body string) (events.APIGatewayV2HTTPResponse, error) {
@@ -34,10 +38,6 @@ func OK(body string) (events.APIGatewayV2HTTPResponse, error) {
 
 func K() (events.APIGatewayV2HTTPResponse, error) {
 	return worker(http.StatusOK, "")
-}
-
-func OnlyOK(body string) (events.APIGatewayV2HTTPResponse, error) {
-	return abbreviatedWorker(http.StatusOK, body)
 }
 
 func worker(code int, body string) (events.APIGatewayV2HTTPResponse, error) {
