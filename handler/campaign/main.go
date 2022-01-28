@@ -23,6 +23,7 @@ import (
 	"plumbus/pkg/util/logs"
 	"plumbus/pkg/util/nums"
 	"strings"
+	"time"
 )
 
 func init() {
@@ -131,6 +132,7 @@ func refresh(ctx context.Context, c *campaign.Entity) (r types.WriteRequest) {
 
 	// even if campaign wasn't updated with performance data,
 	// create the write request to update the db with fb data.
+	c.Refreshed = time.Now()
 	r = c.WriteRequest()
 
 	return
