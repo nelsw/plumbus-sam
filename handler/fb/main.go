@@ -14,7 +14,6 @@ import (
 	"os"
 	"plumbus/pkg/model/account"
 	"plumbus/pkg/model/campaign"
-	"plumbus/pkg/model/fb"
 	"plumbus/pkg/util/logs"
 	"strings"
 	"sync"
@@ -32,6 +31,13 @@ const (
 )
 
 var mutex = sync.Mutex{}
+
+type payload struct {
+	Data []interface{} `json:"data"`
+	Page struct {
+		Next string `json:"next"`
+	} `json:"paging"`
+}
 
 func init() {
 	logs.Init()
@@ -225,7 +231,7 @@ func get(url string, attempts ...int) (data []interface{}, err error) {
 		return
 	}
 
-	var p fb.Payload
+	var p payload
 	if err = json.Unmarshal(body, &p); err != nil {
 		log.WithError(err).Error()
 		return
