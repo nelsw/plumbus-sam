@@ -23,7 +23,6 @@ import (
 	"plumbus/pkg/util/logs"
 	"plumbus/pkg/util/nums"
 	"strings"
-	"time"
 )
 
 func init() {
@@ -46,9 +45,16 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 	}
 }
 
+// put requests all campaigns for the given account ID from the fb handler
+// and reconciles fb campaign description and insight data with arbo or sovrn performance data
+// and saves this new aggregated result as a campaign entity to the database
+// and deletes campaign entities with ids that were not found in the fb handler result
+// and returns newly saved aggregates
 func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 
-	data, _ := json.Marshal(map[string]interface{}{"node": "campaigns", "ID": req.QueryStringParameters["accountID"]})
+	accountID := req.QueryStringParameters["accountID"]
+
+	data, _ := json.Marshal(map[string]interface{}{"node": "campaigns", "ID": accountID})
 
 	var err error
 	var out *faas.InvokeOutput
@@ -63,58 +69,66 @@ func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGat
 		return api.Err(err)
 	}
 
+	ccc := map[string]campaign.Entity{}
 	var rr []types.WriteRequest
 	for _, c := range cc {
-		c.SetUTM()
-		c.SetFormat()
-		var r types.WriteRequest
-		if r, err = refresh(ctx, &c); err != nil {
-			log.WithError(err).Warn()
-		}
-		rr = append(rr, r) // we always get a response
+		rr = append(rr, refresh(ctx, &c)) // we always get a response
+		ccc[c.ID] = c
 	}
 
 	if err = repo.BatchWrite(ctx, campaign.Table, rr); err != nil {
 		return api.Err(err)
 	}
 
-	return api.JSON(cc)
+	if cc, err = query(ctx, accountID); err != nil {
+		return api.Err(err)
+	}
+
+	var ret []campaign.Entity
+	rr = []types.WriteRequest{}
+	for _, c := range cc {
+		if val, ok := ccc[c.ID]; ok {
+			ret = append(ret, val)
+		} else {
+			rr = append(rr, c.WriteRequest(true))
+		}
+	}
+
+	if err = repo.BatchWrite(ctx, campaign.Table, rr); err != nil {
+		return api.Err(err)
+	}
+
+	return api.JSON(ret)
 
 }
 
-func refresh(ctx context.Context, c *campaign.Entity) (r types.WriteRequest, err error) {
+func refresh(ctx context.Context, c *campaign.Entity) (r types.WriteRequest) {
 
 	var a arbo.Entity
 	var s sovrn.Entity
 
+	var err error
+
 	if err = repo.Get(ctx, arbo.Table, "ID", c.ID, &a); err != nil {
 		log.WithError(err).Warn()
-	} else if err = repo.Get(ctx, sovrn.Table, "UTM", c.UTM, &s); err != nil {
+	} else if err = repo.Get(ctx, sovrn.Table, "UTM", c.GetUTM(), &s); err != nil {
 		log.WithError(err).Warn()
 	}
 
-	// assign r here in event of err or empty performance data
-	r = c.WriteRequest()
-
 	if err != nil {
-		log.Trace("errors getting arbo and sovrn data for " + c.ID)
+		log.WithError(err).Warn("errors getting arbo and sovrn data for ", c.ID)
 	} else if a.ID == c.ID {
 		c.Revenue = nums.Float64(a.Revenue)
 		c.Profit = nums.Float64(a.Profit)
 		c.ROI = nums.Float64(a.Roi)
-		c.Refreshed = time.Now()
-		r = c.WriteRequest()
 	} else if s.UTM == c.UTM {
 		c.Revenue = s.Revenue
-		c.Profit = c.Revenue - c.Spent()
-		if c.Profit == c.Revenue || c.Profit == c.Spent() {
-			c.ROI = c.Profit * 100
-		} else {
-			c.ROI = c.Profit / c.Spent() * 100
-		}
-		c.Refreshed = time.Now()
-		r = c.WriteRequest()
+		c.SetPerformance()
 	}
+
+	// even if campaign wasn't updated with performance data,
+	// create the write request to update the db with fb data.
+	r = c.WriteRequest()
 
 	return
 }
@@ -174,7 +188,7 @@ func update(ctx context.Context, accountID, ID string, status campaign.Status) (
 				Value: status.String(),
 			},
 		},
-		UpdateExpression: ptr.String("set Circ = :v1"),
+		UpdateExpression: ptr.String("set Stated = :v1"),
 	}
 
 	if _, err = repo.Update(ctx, in); err != nil {
@@ -186,25 +200,31 @@ func update(ctx context.Context, accountID, ID string, status campaign.Status) (
 
 // get queries the db for all campaigns where the given parameters equal the key expression attribute values.
 func get(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	if out, err := find(ctx, req); err != nil {
-		return api.Err(err)
-	} else if len(out) == 0 {
-		return api.Empty()
-	} else {
-		for i := range out {
-			out[i].SetFormat()
-		}
-		return api.JSON(out)
-	}
-}
 
-func find(ctx context.Context, req events.APIGatewayV2HTTPRequest) ([]campaign.Entity, error) {
+	var err error
+	var out []campaign.Entity
+
 	accountID := req.QueryStringParameters["accountID"]
 	if campaignIDS, ok := req.QueryStringParameters["campaignIDS"]; ok {
-		return batch(ctx, accountID, strings.Split(campaignIDS, ","))
+		out, err = batch(ctx, accountID, strings.Split(campaignIDS, ","))
 	} else {
-		return query(ctx, accountID)
+		out, err = query(ctx, accountID)
 	}
+
+	if err != nil {
+		return api.Err(err)
+	}
+
+	if len(out) == 0 {
+		return api.Empty()
+	}
+
+	for i := range out {
+		out[i].SetPerformance()
+		out[i].SetFormat()
+	}
+
+	return api.JSON(out)
 }
 
 func batch(ctx context.Context, accountID string, ids []string) (cc []campaign.Entity, err error) {
@@ -233,13 +253,12 @@ func batch(ctx context.Context, accountID string, ids []string) (cc []campaign.E
 	var out *dynamodb.BatchGetItemOutput
 	if out, err = repo.BatchGet(ctx, in); err != nil {
 		log.WithError(err).Error()
-		return
 	} else if err = attributevalue.UnmarshalListOfMaps(out.Responses[campaign.Table], &cc); err != nil {
 		log.WithError(err).Error()
-		return
+	} else {
+		log.Trace("batch get for AccountID ", accountID, " found ", len(cc), " out of the given ", len(ids))
 	}
 
-	log.Trace("batch get for AccountID ", accountID, " found ", len(cc), " out of the given ", len(ids))
 	return
 }
 
@@ -256,13 +275,12 @@ func query(ctx context.Context, accountID string) (cc []campaign.Entity, err err
 	var out *dynamodb.QueryOutput
 	if out, err = repo.Query(ctx, in); err != nil {
 		log.WithError(err).Error()
-		return
 	} else if err = attributevalue.UnmarshalListOfMaps(out.Items, &cc); err != nil {
 		log.WithError(err).Error()
-		return
+	} else {
+		log.Trace("query for AccountID ", accountID, " found ", len(cc))
 	}
 
-	log.Trace("query for AccountID ", accountID, " found ", len(cc))
 	return
 }
 
