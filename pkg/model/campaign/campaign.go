@@ -139,6 +139,17 @@ type Entity struct {
 	Formatted Formatted `json:"formatted"`
 }
 
+type Node struct {
+	// AccountID is the partition key; It represents the Account which owns this campaign.
+	AccountID string `json:"account_id"`
+
+	// ID is the index key and unique identifier for this entity.
+	ID string `json:"id"`
+
+	// Named is the campaign name and effectively a magic string for aggregating data and producing KPI's. GL.
+	Named string `json:"name"`
+}
+
 func (e *Entity) SetFormat() {
 	dailyBudget, _ := decimal.NewFromString(e.DailyBudget)
 	budgetRemaining, _ := decimal.NewFromString(e.BudgetRemaining)
