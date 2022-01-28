@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"plumbus/pkg/api"
 	"plumbus/pkg/model/campaign"
-	"plumbus/pkg/model/fb"
 	"plumbus/pkg/model/rule"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/sam"
@@ -74,6 +73,8 @@ func put(ctx context.Context, body string) (events.APIGatewayV2HTTPResponse, err
 	var e rule.Entity
 	if err := json.Unmarshal([]byte(body), &e); err != nil {
 		return api.Err(err)
+	} else if err = e.Effect.Validate(); err != nil {
+		return api.Err(err)
 	}
 
 	now := time.Now().UTC()
@@ -111,10 +112,14 @@ func del(ctx context.Context, id string) (events.APIGatewayV2HTTPResponse, error
 
 func postAll(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 
+	log.Trace("performing rule analysis requested by system")
+
 	var ee []rule.Entity
 	if err := repo.Scan(ctx, &dynamodb.ScanInput{TableName: rule.TableName()}, &ee); err != nil {
 		return api.Err(err)
 	}
+
+	log.Trace("found ", len(ee), " rules to analyze and potentially act upon")
 
 	var wg sync.WaitGroup
 	for _, e := range ee {
@@ -122,7 +127,9 @@ func postAll(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 		go func(e rule.Entity) {
 			defer wg.Done()
 			if err := post(ctx, e); err != nil {
-				log.WithError(err).Error()
+				log.WithError(err).
+					WithFields(log.Fields{"rule": e}).
+					Error("while getting campaigns and/or evaluating campaigns against the given rule")
 				return
 			}
 		}(e)
@@ -130,18 +137,32 @@ func postAll(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 
 	wg.Wait()
 
+	log.Trace("completed rule analysis from user request")
+
 	return api.K()
 }
 
 func postOne(ctx context.Context, body string) (events.APIGatewayV2HTTPResponse, error) {
+
+	log.Trace("performing rule analysis requested by user")
+
 	var e rule.Entity
 	if err := json.Unmarshal([]byte(body), &e); err != nil {
+		log.WithError(err).Error("unable to unmarshal request body into a rule entity")
 		return api.Err(err)
-	} else if err := post(ctx, e); err != nil {
-		return api.Err(err)
-	} else {
-		return api.K()
 	}
+
+	log.WithFields(log.Fields{"rule.Entity": e}).Trace("successfully interpreted request body into a rule entity")
+
+	if err := post(ctx, e); err != nil {
+		log.WithError(err).
+			WithFields(log.Fields{"rule": e}).
+			Error("while getting campaigns and/or evaluating campaigns against the given rule")
+		return api.Err(err)
+	}
+
+	log.Trace("successfully completed rule analysis from user request")
+	return api.K()
 }
 
 func post(ctx context.Context, r rule.Entity) error {
@@ -156,7 +177,7 @@ func post(ctx context.Context, r rule.Entity) error {
 
 		var err error
 		var out *faas.InvokeOutput
-		if out, err = sam.NewReqRes(ctx, campaign.Handler(), sam.NewRequestBytes(http.MethodGet, params)); err != nil {
+		if out, err = sam.NewReqRes(ctx, campaign.Handler, sam.NewRequestBytes(http.MethodGet, params)); err != nil {
 			return err
 		}
 
@@ -181,7 +202,7 @@ func post(ctx context.Context, r rule.Entity) error {
 
 func eval(ctx context.Context, r rule.Entity, c campaign.Entity) {
 
-	if string(r.Effect) == c.Circ {
+	if r.Effect == c.Stated {
 		log.Trace("rule effect == campaign status")
 		return
 	}
@@ -207,20 +228,33 @@ func eval(ctx context.Context, r rule.Entity, c campaign.Entity) {
 		return
 	}
 
-	var err error
-	var out *faas.InvokeOutput
+	log.WithFields(log.Fields{
+		"AccountID":    c.AccountID,
+		"CampaignID":   c.ID,
+		"CampaignName": c.Named,
+		"Spend":        c.Spend,
+		"Revenue":      c.Revenue,
+		"Profit":       c.Profit,
+		"ROI":          c.ROI,
+		"RuleID":       r.ID,
+		"RuleName":     r.Named,
+		"Rule Effect":  r.Effect,
+	}).Trace("Campaign met rule conditions; Will attempt to effect change through the campaign handler")
 
-	params := map[string]string{
-		"node":   "campaign",
-		"id":     c.ID,
-		"status": string(r.Effect),
-	}
-	data, _ := json.Marshal(params)
-	if out, err = sam.NewEvent(ctx, fb.Handler(), data); err != nil {
+	data := sam.NewRequestBytes(http.MethodPatch, map[string]string{
+		"status":    r.Effect.String(),
+		"accountID": c.AccountID,
+		"ID":        c.ID,
+	})
+
+	if out, err := sam.NewReqRes(ctx, campaign.Handler, data); err != nil {
 		log.WithError(err).
 			WithFields(log.Fields{"code": out.StatusCode, "payload": string(out.Payload)}).
 			Error("while sending an update status event to fb handler")
+		return
 	}
+
+	log.Trace("Successfully updated campaign status in Facebook and in the Plumbus database ... grab a beer.")
 }
 
 func main() {

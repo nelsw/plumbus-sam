@@ -9,7 +9,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"plumbus/pkg/model/campaign"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/util/logs"
 	"strings"
@@ -17,16 +16,11 @@ import (
 )
 
 const (
-	api             = "https://graph.facebook.com/v12.0"
-	formContentType = "application/x-www-form-urlencoded"
-	handler         = "plumbus_campaignHandler"
+	api     = "https://graph.facebook.com/v12.0"
+	Handler = "plumbus_fbHandler"
 )
 
-func Handler() string {
-	return handler
-}
-
-type payload struct {
+type Payload struct {
 	Data []interface{} `json:"data"`
 	Page struct {
 		Next string `json:"next"`
@@ -39,13 +33,6 @@ func init() {
 
 func Get(url string) (data []interface{}, err error) {
 	return getAttempt(url, 1)
-}
-
-func UpdateCampaignStatus(id string, s campaign.Status) (err error) {
-	if _, err = http.Post(api+"/"+id+Token()+s.Status(), formContentType, nil); err != nil {
-		log.WithError(err).Error()
-	}
-	return
 }
 
 func getAttempt(url string, attempt int) (data []interface{}, err error) {
@@ -76,7 +63,7 @@ func getAttempt(url string, attempt int) (data []interface{}, err error) {
 		return
 	}
 
-	var p payload
+	var p Payload
 	if err = json.Unmarshal(body, &p); err != nil {
 		log.WithError(err).Error()
 		return

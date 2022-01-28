@@ -20,7 +20,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/aws/smithy-go/ptr"
 	log "github.com/sirupsen/logrus"
 	"net/http"
 	"plumbus/pkg/api"
@@ -44,7 +43,7 @@ const (
 )
 
 var (
-	accountTable  = "plumbus_fb_account"
+	accountTable  = "plumbus_account"
 	campaignTable = "plumbus_fb_campaign"
 	mutex         = &sync.Mutex{}
 )
@@ -181,18 +180,6 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 	case http.MethodOptions:
 		return api.K()
 
-	case http.MethodGet:
-		switch node {
-		case "root":
-			return getRoot(ctx)
-		case "account":
-			return getAccounts(ctx)
-		case "campaign":
-			return getCampaigns(ctx, req.QueryStringParameters["id"])
-		default:
-			return api.Nada()
-		}
-
 	case http.MethodPut:
 		switch node {
 		case "account":
@@ -243,7 +230,7 @@ func postCampaigns(ctx context.Context) (events.APIGatewayV2HTTPResponse, error)
 	if res, _ := putCampaignDetailValuesResponse(ctx); res.StatusCode != http.StatusOK {
 		return res, nil
 	}
-	data := sam.NewRequestBytes(http.MethodPost, map[string]string{"node": "all"})
+	data := sam.NewRequestBytes(http.MethodPost, map[string]string{"all": "all"})
 	if _, err := sam.NewEvent(ctx, rule.Handler(), data); err != nil {
 		return api.Err(err)
 	}
@@ -502,32 +489,6 @@ func addRevenue(ctx context.Context, cc []campaign, ii []insight) {
 	}
 }
 
-func getAccounts(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
-
-	var out []account
-	if err := repo.Scan(ctx, &dynamodb.ScanInput{TableName: &accountTable}, &out); err != nil {
-		return api.Err(err)
-	}
-
-	if ign, err := fb.AccountsToIgnore(ctx); err != nil {
-		return api.Err(err)
-	} else {
-
-		var aa []account
-		for _, a := range out {
-			if _, ok := ign[a.ID]; !ok {
-				aa = append(aa, a)
-			}
-		}
-
-		if data, err := json.Marshal(&aa); err != nil {
-			return api.Err(err)
-		} else {
-			return api.OK(string(data))
-		}
-	}
-}
-
 func getAccountValues(ctx context.Context) (out []account, err error) {
 
 	var all []interface{}
@@ -571,96 +532,6 @@ func getAccountValues(ctx context.Context) (out []account, err error) {
 	}
 
 	wg.Wait()
-
-	return
-}
-
-func getCampaigns(ctx context.Context, accountID string) (events.APIGatewayV2HTTPResponse, error) {
-
-	var err error
-
-	in := &dynamodb.QueryInput{
-		TableName:              &campaignTable,
-		KeyConditionExpression: ptr.String("AccountID = :v1"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":v1": &types.AttributeValueMemberS{Value: accountID},
-		},
-	}
-
-	var out *dynamodb.QueryOutput
-	if out, err = repo.Query(ctx, in); err != nil {
-		return api.Err(err)
-	}
-
-	var camps []campaign
-	if err = attributevalue.UnmarshalListOfMaps(out.Items, &camps); err != nil {
-		return api.Err(err)
-	}
-
-	if len(camps) == 0 {
-		return api.Empty()
-	}
-
-	var data []byte
-	if data, err = json.Marshal(&camps); err != nil {
-		return api.Err(err)
-	}
-
-	return api.OK(string(data))
-}
-
-func getRoot(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
-
-	var aa []accountNode
-	if err := repo.Scan(ctx, &dynamodb.ScanInput{TableName: &accountTable}, &aa); err != nil {
-		return api.Err(err)
-	}
-
-	if ign, err := fb.AccountsToIgnore(ctx); err != nil {
-		return api.Err(err)
-	} else {
-		var out []accountNode
-		var wg sync.WaitGroup
-		for _, a := range aa {
-			if _, ok := ign[a.ID]; ok {
-				continue
-			}
-			wg.Add(1)
-			go func(a accountNode) {
-				defer wg.Done()
-				var err error
-				if a.Kids, err = campaigns(ctx, a.ID); err != nil {
-					log.WithError(err).Error()
-				}
-				out = append(out, a)
-			}(a)
-		}
-		wg.Wait()
-
-		if data, err := json.Marshal(&out); err != nil {
-			return api.Err(err)
-		} else {
-			return api.OnlyOK(string(data))
-		}
-	}
-}
-
-func campaigns(ctx context.Context, accountID string) (cc []campaignNode, err error) {
-
-	in := &dynamodb.QueryInput{
-		TableName:              &campaignTable,
-		KeyConditionExpression: ptr.String("AccountID = :v1"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":v1": &types.AttributeValueMemberS{Value: accountID},
-		},
-	}
-
-	var out *dynamodb.QueryOutput
-	if out, err = repo.Query(ctx, in); err != nil {
-		log.WithError(err).Error()
-	} else if err = attributevalue.UnmarshalListOfMaps(out.Items, &cc); err != nil {
-		log.WithError(err).Error()
-	}
 
 	return
 }
