@@ -126,6 +126,10 @@ func postAll(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 		wg.Add(1)
 		go func(e rule.Entity) {
 			defer wg.Done()
+			if !e.Active {
+				log.Trace("inactive rule: ", e.ID)
+				return
+			}
 			if err := post(ctx, e); err != nil {
 				log.WithError(err).
 					WithFields(log.Fields{"rule": e}).
