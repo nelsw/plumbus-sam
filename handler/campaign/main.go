@@ -4,6 +4,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -155,7 +157,7 @@ func patch(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIG
 		return api.Err(err)
 	} else {
 		for _, c := range cc {
-			if err := update(ctx, accountID, c.ID, status); err != nil {
+			if err = update(ctx, accountID, c.ID, status); err != nil {
 				return api.Err(err)
 			}
 		}
@@ -173,7 +175,14 @@ func update(ctx context.Context, accountID, ID string, status campaign.Status) (
 	}
 
 	data, _ := json.Marshal(param)
-	if _, err = sam.NewReqRes(ctx, fb.Handler, data); err != nil {
+	var out *faas.InvokeOutput
+	if out, err = sam.NewReqRes(ctx, fb.Handler, data); err != nil {
+		log.WithError(err).Error()
+		return
+	}
+
+	if out.StatusCode != http.StatusOK {
+		err = errors.New(fmt.Sprintf("bad status code from FB Handler [%d]", out.StatusCode))
 		log.WithError(err).Error()
 		return
 	}
