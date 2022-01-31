@@ -166,9 +166,13 @@ func getCampaignsSight(ID string) (out []campaign.Entity, err error) {
 
 func postCampaignStatus(req map[string]interface{}) (v interface{}, err error) {
 
-	url := fmt.Sprintf("%s/%s?%s&%s", api, req["ID"], tokenParam(), req["status"].(campaign.Status).Param())
+	url := fmt.Sprintf("%s/%s?%s&status=%s", api, req["ID"], tokenParam(), req["status"])
 
-	if _, err = http.Post(url, formContentType, nil); err != nil {
+	var res *http.Response
+	if res, err = http.Post(url, formContentType, nil); err != nil {
+		log.WithError(err).Error()
+	} else if res.StatusCode != http.StatusOK {
+		err = errors.New(fmt.Sprintf("bad status code from campaign status update [%d]", res.StatusCode))
 		log.WithError(err).Error()
 	}
 
