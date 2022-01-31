@@ -29,7 +29,7 @@ func TestHandleCampaignStatusUpdate(t *testing.T) {
 
 	param := map[string]interface{}{
 		"node":   "campaign",
-		"ID":     "23850116984960705",
+		"ID":     "23850120461840705",
 		"status": campaign.Paused,
 	}
 
