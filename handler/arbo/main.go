@@ -15,8 +15,6 @@ import (
 	"plumbus/pkg/model/arbo"
 	"plumbus/pkg/repo"
 	"plumbus/pkg/util/logs"
-	"plumbus/pkg/util/nums"
-	"plumbus/pkg/util/pretty"
 )
 
 var client = &http.Client{}
@@ -63,12 +61,6 @@ func put(ctx context.Context) (events.APIGatewayV2HTTPResponse, error) {
 	}
 
 	log.Trace("all entities saved")
-
-	for _, e := range ee {
-		if nums.Float64(e.Revenue) > 0 {
-			pretty.Print(e)
-		}
-	}
 
 	return api.K()
 }
