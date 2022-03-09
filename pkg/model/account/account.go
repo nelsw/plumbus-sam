@@ -118,24 +118,7 @@ func (e *Entity) MarshalJSON() (data []byte, err error) {
 	var created time.Time
 	created, err = time.Parse("2006-01-02T15:04:05-0700", e.Created)
 
-	if e.Campaigns != nil && len(e.Campaigns) > 0 {
-		for _, c := range e.Campaigns {
-			if c.Stated == campaign.Active {
-				e.Performance.Active += 1
-			}
-			e.Performance.Spend += c.Spent()
-			e.Performance.Revenue += c.Revenue
-			e.Performance.Profit += c.Profit
-			e.Performance.ROI += c.ROI
-		}
-		if e.Performance.Active > 0 {
-			e.Performance.ROI /= float64(e.Performance.Active)
-		}
-		e.Performance.Inactive = len(e.Campaigns) - e.Performance.Active
-		e.Performance.SetFormat()
-	}
-
-	return json.Marshal(map[string]interface{}{
+	v := map[string]interface{}{
 		"id":             e.ID,
 		"account_id":     e.ID,
 		"name":           e.Named,
@@ -146,7 +129,51 @@ func (e *Entity) MarshalJSON() (data []byte, err error) {
 		"created":        created,
 		"children":       e.Children,
 		"performance":    e.Performance,
-	})
+	}
+
+	// if there are no campaigns to calculate performance
+	if e.Campaigns == nil && len(e.Campaigns) == 0 {
+		return json.Marshal(v)
+	}
+
+	var revenue, profit, spend float64
+	for _, c := range e.Campaigns {
+
+		// if this campaign is active,
+		// increment account entity
+		// active campaigns tally
+		if c.Stated == campaign.Active {
+			e.Performance.Active++
+		}
+
+		// increment respective performance values
+		// note: inactive campaigns may have data
+		revenue += c.Revenue
+		profit += c.Profit
+		spend += c.Spent()
+	}
+
+	var roi float64
+	if profit == 0 || (spend == 0 && revenue == 0) {
+		roi = 0
+	} else if spend == 0 {
+		roi = 100
+	} else if revenue == 0 {
+		roi = -100
+	} else {
+		roi = profit / spend * 100
+	}
+
+	e.Performance.Inactive = len(e.Campaigns) - e.Performance.Active
+	e.Performance.Revenue = revenue
+	e.Performance.Profit = profit
+	e.Performance.Spend = spend
+	e.Performance.ROI = roi
+	e.Performance.SetFormat()
+
+	v["performance"] = e.Performance
+
+	return json.Marshal(v)
 }
 
 func (e *Entity) UnmarshalJSON(data []byte) (err error) {

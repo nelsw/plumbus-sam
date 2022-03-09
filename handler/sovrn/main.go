@@ -28,7 +28,7 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 
 	data := sam.NewRequestBytes(http.MethodPut, nil)
 	arboSuccess := true
-	if _, err := sam.NewReqRes(ctx, arbo.Handler, data); err != nil {
+	if _, err := sam.NewEvent(ctx, arbo.Handler, data); err != nil {
 		log.WithError(err).Error("while invoking request response from arbo handler")
 		arboSuccess = false
 	}
