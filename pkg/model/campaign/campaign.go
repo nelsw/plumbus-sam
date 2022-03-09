@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/shopspring/decimal"
 	"plumbus/pkg/util/nums"
 	"plumbus/pkg/util/pretty"
 	"regexp"
@@ -22,10 +21,10 @@ var (
 type Status string
 
 const (
-	Active   Status = "ACTIVE"
-	Paused   Status = "PAUSED"
-	Deleted  Status = "DELETED"
-	Archived Status = "ARCHIVED"
+	Active Status = "ACTIVE"
+	//Paused   Status = "PAUSED"
+	//Deleted  Status = "DELETED"
+	//Archived Status = "ARCHIVED"
 )
 
 func (s Status) Param() string {
@@ -151,28 +150,19 @@ type Node struct {
 }
 
 func (e *Entity) SetFormat() {
-	dailyBudget, _ := decimal.NewFromString(e.DailyBudget)
-	budgetRemaining, _ := decimal.NewFromString(e.BudgetRemaining)
-	clicks, _ := decimal.NewFromString(e.Clicks)
-	impressions, _ := decimal.NewFromString(e.Impressions)
-	spend, _ := decimal.NewFromString(e.Spend)
-	cpc, _ := decimal.NewFromString(e.CPC)
-	cpp, _ := decimal.NewFromString(e.CPP)
-	cpm, _ := decimal.NewFromString(e.CPM)
-	ctr, _ := decimal.NewFromString(e.CTR)
 	e.Formatted = Formatted{
-		DailyBudget:     pretty.USD(dailyBudget, true),
-		BudgetRemaining: pretty.USD(budgetRemaining),
-		Clicks:          pretty.Int(clicks),
-		Impressions:     pretty.Int(impressions),
-		Spend:           pretty.USD(spend),
-		CPC:             pretty.USD(cpc),
-		CPP:             pretty.USD(cpp),
-		CPM:             pretty.USD(cpm),
-		CTR:             pretty.Percent(ctr, 2),
-		Revenue:         pretty.USD(decimal.NewFromFloat(e.Revenue)),
-		Profit:          pretty.USD(decimal.NewFromFloat(e.Profit)),
-		ROI:             pretty.Percent(decimal.NewFromFloat(e.ROI), 0),
+		DailyBudget:     pretty.USD(e.DailyBudget, true),
+		BudgetRemaining: pretty.USD(e.BudgetRemaining, true),
+		Clicks:          pretty.Int(e.Clicks),
+		Impressions:     pretty.Int(e.Impressions),
+		Spend:           pretty.USD(e.Spend),
+		CPC:             pretty.USD(e.CPC),
+		CPP:             pretty.USD(e.CPP),
+		CPM:             pretty.USD(e.CPM),
+		CTR:             pretty.Percent(e.CTR, 2),
+		Revenue:         pretty.USD(e.Revenue),
+		Profit:          pretty.USD(e.Profit),
+		ROI:             pretty.Percent(e.ROI, 0),
 	}
 }
 
