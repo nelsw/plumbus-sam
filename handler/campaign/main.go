@@ -53,9 +53,11 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 // and updates the campaign entity in the database
 func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 
+	accountID := req.QueryStringParameters["accountID"]
+
 	param := map[string]interface{}{
 		"node": "campaigns",
-		"ID":   req.QueryStringParameters["accountID"],
+		"ID":   accountID,
 	}
 
 	data, _ := json.Marshal(param)
@@ -95,6 +97,10 @@ func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGat
 		return api.Err(err)
 	}
 
+	if cc, err = query(ctx, accountID); err != nil {
+		return api.Err(err)
+	}
+
 	return api.JSON(cc)
 }
 
@@ -127,7 +133,7 @@ func refresh(ctx context.Context, c *campaign.Entity) (r types.WriteRequest, err
 	} else {
 		c.Revenue = s.Revenue
 		c.Profit = c.Revenue - c.Spent()
-		if c.Profit == 0 {
+		if c.Profit == 0 || (c.Spent() == 0 && c.Revenue == 0) {
 			c.ROI = 0
 		} else if c.Spent() == 0 {
 			c.ROI = 100
@@ -138,7 +144,7 @@ func refresh(ctx context.Context, c *campaign.Entity) (r types.WriteRequest, err
 		}
 	}
 
-	c.Refreshed = time.Now()
+	c.Refreshed = time.Now().Format(time.RFC3339)
 	r = c.WriteRequest()
 
 	return
