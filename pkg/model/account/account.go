@@ -136,7 +136,7 @@ func (e *Entity) MarshalJSON() (data []byte, err error) {
 		return json.Marshal(v)
 	}
 
-	var revenue, profit, spend float64
+	var revenue, spend float64
 	for _, c := range e.Campaigns {
 
 		// if this campaign is active,
@@ -149,12 +149,11 @@ func (e *Entity) MarshalJSON() (data []byte, err error) {
 		// increment respective performance values
 		// note: inactive campaigns may have data
 		revenue += c.Revenue
-		profit += c.Profit
 		spend += c.Spent()
 	}
 
-	var roi float64
-	if profit == 0 || (spend == 0 && revenue == 0) {
+	var roi, profit float64
+	if profit = revenue - spend; profit == 0 || (spend == 0 && revenue == 0) {
 		roi = 0
 	} else if spend == 0 {
 		roi = 100
