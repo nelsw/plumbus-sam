@@ -122,7 +122,7 @@ func refresh(ctx context.Context, c *campaign.Entity) (r types.WriteRequest, err
 	}
 
 	if a.ID != c.ID && s.UTM != c.UTM {
-		log.Warn("arbo and sovrn entities do not match, panic!")
+		err = errors.New("arbo and sovrn entities do not match, panic")
 		return
 	}
 
