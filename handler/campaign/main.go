@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -47,6 +48,9 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 	}
 }
 
+// put gets all campaign entities from the fb handler for the given account
+// and refreshes them with performance data from the arbo or sovrn handler
+// and updates the campaign entity in the database
 func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 
 	param := map[string]interface{}{
@@ -94,6 +98,7 @@ func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGat
 	return api.JSON(cc)
 }
 
+// refresh is a helper method for updating a campaign entity received from fb with performance data from arbo or sovrn
 func refresh(ctx context.Context, c *campaign.Entity) (r types.WriteRequest, err error) {
 
 	var a arbo.Entity
@@ -139,32 +144,35 @@ func refresh(ctx context.Context, c *campaign.Entity) (r types.WriteRequest, err
 	return
 }
 
+// patch modifies either a single campaign status or the status of every campaign under an account
 func patch(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 
+	var err error
 	status := campaign.Status(req.QueryStringParameters["status"])
 	accountID := req.QueryStringParameters["accountID"]
-	ID := req.QueryStringParameters["ID"]
 
-	if ID != "" {
-		if err := update(ctx, accountID, ID, status); err != nil {
+	if ID := req.QueryStringParameters["ID"]; ID != "" {
+		if err = update(ctx, accountID, ID, status); err != nil {
 			return api.Err(err)
 		}
 		return api.K()
 	}
 
-	if cc, err := query(ctx, accountID); err != nil {
+	var cc []campaign.Entity
+	if cc, err = query(ctx, accountID); err != nil {
 		return api.Err(err)
-	} else {
-		for _, c := range cc {
-			if err := update(ctx, accountID, c.ID, status); err != nil {
-				return api.Err(err)
-			}
+	}
+
+	for _, c := range cc {
+		if err = update(ctx, accountID, c.ID, status); err != nil {
+			return api.Err(err)
 		}
 	}
 
 	return api.K()
 }
 
+// update modifies a campaign status in fb and if successful, modifies a campaign status in the db
 func update(ctx context.Context, accountID, ID string, status campaign.Status) (err error) {
 
 	param := map[string]interface{}{
@@ -204,28 +212,42 @@ func update(ctx context.Context, accountID, ID string, status campaign.Status) (
 	return
 }
 
-// get queries the db for all campaigns where the given parameters equal the key expression attribute values.
+// get returns all campaign entities from the db that match the given accountID and campaignIDS (csv) parameters.
 func get(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	if out, err := find(ctx, req); err != nil {
-		return api.Err(err)
-	} else if len(out) == 0 {
-		return api.Empty()
+
+	var found bool
+	var accountID string
+
+	if accountID, found = req.QueryStringParameters["accountID"]; !found {
+		return api.Err(errors.New("request missing accountID"))
+	}
+
+	var err error
+	var campaignIDS string
+	var cc []campaign.Entity
+
+	if campaignIDS, found = req.QueryStringParameters["campaignIDS"]; found {
+		cc, err = batch(ctx, accountID, strings.Split(campaignIDS, ","))
 	} else {
-		for i := range out {
-			out[i].SetFormat()
-		}
-		return api.JSON(out)
+		cc, err = query(ctx, accountID)
 	}
+
+	if err != nil {
+		return api.Err(err)
+	}
+
+	if len(cc) == 0 {
+		return api.Empty()
+	}
+
+	for i := range cc {
+		cc[i].SetFormat()
+	}
+	return api.JSON(cc)
 }
 
-func find(ctx context.Context, req events.APIGatewayV2HTTPRequest) ([]campaign.Entity, error) {
-	accountID := req.QueryStringParameters["accountID"]
-	if campaignIDS, ok := req.QueryStringParameters["campaignIDS"]; ok {
-		return batch(ctx, accountID, strings.Split(campaignIDS, ","))
-	}
-	return query(ctx, accountID)
-}
-
+// batch returns a campaign entity array from the db where a campaign account ID and the given campaign ids are equal to
+// the given parameters
 func batch(ctx context.Context, accountID string, ids []string) (cc []campaign.Entity, err error) {
 
 	var keys []map[string]types.AttributeValue
@@ -261,6 +283,7 @@ func batch(ctx context.Context, accountID string, ids []string) (cc []campaign.E
 	return
 }
 
+// query returns a campaign entity array from the db where the accountID is equal to the given parameter.
 func query(ctx context.Context, accountID string) (cc []campaign.Entity, err error) {
 
 	in := &dynamodb.QueryInput{
