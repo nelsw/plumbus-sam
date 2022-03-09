@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 )
 
 var (
@@ -130,7 +129,7 @@ type Entity struct {
 	Updated string `json:"updated_time"`
 
 	// Refreshed is when this campaign was updated with Arbo or Sovrn tracking data
-	Refreshed time.Time `json:"refreshed"`
+	Refreshed string `json:"refreshed"`
 
 	/*
 		format
@@ -174,6 +173,7 @@ func (e *Entity) item() map[string]types.AttributeValue {
 		"Stated":          &types.AttributeValueMemberS{Value: e.Stated.String()},
 		"Created":         &types.AttributeValueMemberS{Value: e.Created},
 		"Updated":         &types.AttributeValueMemberS{Value: e.Updated},
+		"Refreshed":       &types.AttributeValueMemberS{Value: e.Refreshed},
 		"DailyBudget":     &types.AttributeValueMemberS{Value: e.DailyBudget},
 		"BudgetRemaining": &types.AttributeValueMemberS{Value: e.BudgetRemaining},
 		"Clicks":          &types.AttributeValueMemberS{Value: e.Clicks},
