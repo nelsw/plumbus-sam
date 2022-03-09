@@ -23,6 +23,7 @@ import (
 	"plumbus/pkg/util/logs"
 	"plumbus/pkg/util/nums"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -48,7 +49,12 @@ func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.API
 
 func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 
-	data, _ := json.Marshal(map[string]interface{}{"node": "campaigns", "ID": req.QueryStringParameters["accountID"]})
+	param := map[string]interface{}{
+		"node": "campaigns",
+		"ID":   req.QueryStringParameters["accountID"],
+	}
+
+	data, _ := json.Marshal(param)
 
 	var err error
 	var out *faas.InvokeOutput
@@ -63,23 +69,29 @@ func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGat
 		return api.Err(err)
 	}
 
+	var wg sync.WaitGroup
 	var rr []types.WriteRequest
 	for _, c := range cc {
-		c.SetUTM()
-		c.SetFormat()
-		var r types.WriteRequest
-		if r, err = refresh(ctx, &c); err != nil {
-			log.WithError(err).Warn()
-		}
-		rr = append(rr, r) // we always get a response
+		wg.Add(1)
+		go func(c campaign.Entity) {
+			defer wg.Done()
+			c.SetUTM()
+			c.SetFormat()
+			if r, err := refresh(ctx, &c); err != nil {
+				log.WithError(err).Warn()
+			} else {
+				rr = append(rr, r)
+			}
+		}(c)
 	}
+
+	wg.Wait()
 
 	if err = repo.BatchWrite(ctx, campaign.Table, rr); err != nil {
 		return api.Err(err)
 	}
 
 	return api.JSON(cc)
-
 }
 
 func refresh(ctx context.Context, c *campaign.Entity) (r types.WriteRequest, err error) {
@@ -93,28 +105,36 @@ func refresh(ctx context.Context, c *campaign.Entity) (r types.WriteRequest, err
 		log.WithError(err).Warn()
 	}
 
-	// assign r here in event of err or empty performance data
-	r = c.WriteRequest()
-
 	if err != nil {
-		log.Trace("errors getting arbo and sovrn data for " + c.ID)
-	} else if a.ID == c.ID {
+		log.Warn("errors getting arbo and sovrn data for " + c.ID)
+		return
+	}
+
+	if a.ID != c.ID && s.UTM != c.UTM {
+		log.Warn("arbo and sovrn entities do not match, panic!")
+		return
+	}
+
+	if a.ID == c.ID {
 		c.Revenue = nums.Float64(a.Revenue)
 		c.Profit = nums.Float64(a.Profit)
 		c.ROI = nums.Float64(a.Roi)
-		c.Refreshed = time.Now()
-		r = c.WriteRequest()
-	} else if s.UTM == c.UTM {
+	} else {
 		c.Revenue = s.Revenue
 		c.Profit = c.Revenue - c.Spent()
-		if c.Profit == c.Revenue || c.Profit == c.Spent() {
-			c.ROI = c.Profit * 100
+		if c.Profit == 0 {
+			c.ROI = 0
+		} else if c.Spent() == 0 {
+			c.ROI = 100
+		} else if c.Revenue == 0 {
+			c.ROI = -100
 		} else {
 			c.ROI = c.Profit / c.Spent() * 100
 		}
-		c.Refreshed = time.Now()
-		r = c.WriteRequest()
 	}
+
+	c.Refreshed = time.Now()
+	r = c.WriteRequest()
 
 	return
 }
@@ -202,9 +222,8 @@ func find(ctx context.Context, req events.APIGatewayV2HTTPRequest) ([]campaign.E
 	accountID := req.QueryStringParameters["accountID"]
 	if campaignIDS, ok := req.QueryStringParameters["campaignIDS"]; ok {
 		return batch(ctx, accountID, strings.Split(campaignIDS, ","))
-	} else {
-		return query(ctx, accountID)
 	}
+	return query(ctx, accountID)
 }
 
 func batch(ctx context.Context, accountID string, ids []string) (cc []campaign.Entity, err error) {
@@ -233,13 +252,12 @@ func batch(ctx context.Context, accountID string, ids []string) (cc []campaign.E
 	var out *dynamodb.BatchGetItemOutput
 	if out, err = repo.BatchGet(ctx, in); err != nil {
 		log.WithError(err).Error()
-		return
 	} else if err = attributevalue.UnmarshalListOfMaps(out.Responses[campaign.Table], &cc); err != nil {
 		log.WithError(err).Error()
-		return
+	} else {
+		log.Trace("batch get for AccountID ", accountID, " found ", len(cc), " out of the given ", len(ids))
 	}
 
-	log.Trace("batch get for AccountID ", accountID, " found ", len(cc), " out of the given ", len(ids))
 	return
 }
 
@@ -249,20 +267,21 @@ func query(ctx context.Context, accountID string) (cc []campaign.Entity, err err
 		TableName:              ptr.String(campaign.Table),
 		KeyConditionExpression: ptr.String("AccountID = :v1"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":v1": &types.AttributeValueMemberS{Value: accountID},
+			":v1": &types.AttributeValueMemberS{
+				Value: accountID,
+			},
 		},
 	}
 
 	var out *dynamodb.QueryOutput
 	if out, err = repo.Query(ctx, in); err != nil {
 		log.WithError(err).Error()
-		return
 	} else if err = attributevalue.UnmarshalListOfMaps(out.Items, &cc); err != nil {
 		log.WithError(err).Error()
-		return
+	} else {
+		log.Trace("query for AccountID ", accountID, " found ", len(cc))
 	}
 
-	log.Trace("query for AccountID ", accountID, " found ", len(cc))
 	return
 }
 
