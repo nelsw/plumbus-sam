@@ -76,6 +76,7 @@ func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGat
 	}
 
 	var wg sync.WaitGroup
+	var ids []string
 	var rr []types.WriteRequest
 	for _, c := range cc {
 		wg.Add(1)
@@ -86,6 +87,7 @@ func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGat
 			if r, err := refresh(ctx, &c); err != nil {
 				log.WithError(err).Warn()
 			} else {
+				ids = append(ids, c.ID)
 				rr = append(rr, r)
 			}
 		}(c)
@@ -97,7 +99,7 @@ func put(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGat
 		return api.Err(err)
 	}
 
-	if cc, err = query(ctx, accountID); err != nil {
+	if cc, err = batch(ctx, accountID, ids); err != nil {
 		return api.Err(err)
 	}
 
