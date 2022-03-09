@@ -87,7 +87,7 @@ func (e *Entity) roi() interface{} {
 		spend := nums.Float64(e.Spend)
 		revenue := nums.Float64(e.Revenue)
 		profit := revenue - spend
-		if profit == 0 {
+		if profit == 0 || (spend == 0 && revenue == 0) {
 			return 0
 		} else if spend == 0 {
 			return 100
